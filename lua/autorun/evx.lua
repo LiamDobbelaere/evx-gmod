@@ -120,10 +120,13 @@ if SERVER then
             color = Color(255, 128, 0, 255),
             spawn = function(ply, ent)
                 ent:SetModelScale(0.5)
-                ent:SetHealth(ent:Health() / 2)
+                ent:SetHealth(ent:Health() / 3)
             end,
             takedamage = function(target, dmginfo) end,
-            givedamage = function(target, dmginfo) end
+            givedamage = function(target, dmginfo)
+                dmginfo:ScaleDamage(0.5)
+                dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 0.5)
+            end
         },
         knockback = {
             color = Color(255, 0, 255, 255),
