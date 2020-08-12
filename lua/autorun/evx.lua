@@ -1,11 +1,18 @@
 AddCSLuaFile()
 
 if SERVER then
-    local evxTypes = {"explosion", "mother", "boss", "bigboss", "knockback"}
+    CreateConVar("evx_enabled", "1", FCVAR_NONE, "Enable enemy variations", 0, 1)
+
+    local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
+
+    local evxTypes = {
+        "explosion", "mother", "boss", "bigboss", "knockback", "cloaked"
+    }
     local evxChances = {
-        ["explosion"] = 50,
         ["nothing"] = 50,
-        ["knockback"] = 20,
+        ["explosion"] = 40,
+        ["knockback"] = 40,
+        ["cloaked"] = 30,
         ["boss"] = 20,
         ["mother"] = 20,
         ["bigboss"] = 5
@@ -42,8 +49,7 @@ if SERVER then
                     explode:Fire("Explode", 0, 0)
                 end
             end,
-            givedamage = function(target, dmginfo) end,
-            lategivedamage = function(target, dmginfo) end
+            givedamage = function(target, dmginfo) end
         },
         boss = {
             color = Color(80, 80, 100, 255),
@@ -55,8 +61,7 @@ if SERVER then
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(2)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
-            end,
-            lategivedamage = function(target, dmginfo) end
+            end
         },
         bigboss = {
             color = Color(0, 255, 255, 255),
@@ -68,8 +73,7 @@ if SERVER then
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(4)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
-            end,
-            lategivedamage = function(target, dmginfo) end
+            end
         },
         mother = {
             color = Color(255, 255, 0, 255),
@@ -110,8 +114,7 @@ if SERVER then
                     b4:Spawn()
                 end
             end,
-            givedamage = function(target, dmginfo) end,
-            lategivedamage = function(target, dmginfo) end
+            givedamage = function(target, dmginfo) end
         },
         motherchild = {
             color = Color(255, 128, 0, 255),
@@ -120,26 +123,38 @@ if SERVER then
                 ent:SetHealth(ent:Health() / 2)
             end,
             takedamage = function(target, dmginfo) end,
-            givedamage = function(target, dmginfo) end,
-            lategivedamage = function(target, dmginfo) end
+            givedamage = function(target, dmginfo) end
         },
         knockback = {
             color = Color(255, 0, 255, 255),
             spawn = function(ply, ent) end,
             takedamage = function(target, dmginfo) end,
             givedamage = function(target, dmginfo)
-                local src = dmginfo:GetAttacker():GetPos()
-                local dst = target:GetPos()
-                local vec = dst - src
-                local nrm = vec:GetNormalized()
+                if target:IsPlayer() or target:IsNPC() then
+                    target:SetVelocity(dmginfo:GetDamageForce() * 1.5) -- Vector(nrm.x * 300, nrm.y * 300, 400))
+                else
+                    if IsValid(target:GetPhysicsObject()) then
+                        target:GetPhysicsObject():SetVelocity(
+                            dmginfo:GetDamageForce() * 1.5) -- Vector(nrm.x * 300, nrm.y * 300, 400))
+                    end
+                end
 
-                target:SetVelocity(dmginfo:GetDamageForce() * 0.8) -- Vector(nrm.x * 300, nrm.y * 300, 400))
+            end
+        },
+        cloaked = {
+            color = Color(255, 255, 255, 255),
+            spawn = function(ply, ent)
+                ent:SetMaterial("evx/cloaked")
+                ent:SetHealth(ent:Health() / 2)
             end,
-            lategivedamage = function(target, dmginfo) end
+            takedamage = function(target, dmginfo) end,
+            givedamage = function(target, dmginfo)
+                dmginfo:ScaleDamage(1.5)
+                dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
+            end
         }
     }
     local evxPendingInit = {}
-    local evxPendingLateGiveDamage = {}
 
     function evxInit(ply, ent)
         ent:SetColor(evxConfig[ent.evxType].color)
@@ -154,6 +169,8 @@ if SERVER then
 
     hook.Add("EntityTakeDamage", "EntityDamageExample",
              function(target, dmginfo)
+        if not IsEvxEnabled() then return end
+
         -- we're a ev-x enemy taking damage
         if IsValid(target) and target.evxType then
             evxConfig[target.evxType].takedamage(target, dmginfo)
@@ -163,24 +180,14 @@ if SERVER then
             end
         end
 
-        -- we're a player taking damage from an ev-x enemy
-        if IsValid(target) and target:IsPlayer() and
+        -- we're an entity taking damage from an ev-x enemy
+        if IsValid(target) and IsEntity(target) and
             IsValid(dmginfo:GetAttacker()) and dmginfo:GetAttacker().evxType then
             evxConfig[dmginfo:GetAttacker().evxType].givedamage(target, dmginfo)
-            table.insert(evxPendingLateGiveDamage, {
-                ["type"] = dmginfo:GetAttacker().evxType,
-                ["target"] = target,
-                ["dmginfo"] = dmginfo
-            })
 
             if dmginfo:GetAttacker().evxType2 then
                 evxConfig[dmginfo:GetAttacker().evxType2].givedamage(target,
                                                                      dmginfo)
-                table.insert(evxPendingLateGiveDamage, {
-                    ["type"] = dmginfo:GetAttacker().evxType2,
-                    ["target"] = target,
-                    ["dmginfo"] = dmginfo
-                })
             end
         end
     end)
@@ -195,6 +202,8 @@ if SERVER then
     end
 
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", function(ent)
+        if not IsEvxEnabled() then return end
+
         if IsValid(ent) and ent:IsNPC() then
             -- Weighted random selection
             local randomWeight = math.random(weightSum)
@@ -220,18 +229,14 @@ if SERVER then
     end)
 
     hook.Add("Tick", "EVXTick", function()
+        if not IsEvxEnabled() then return end
+
         for evxPendingIndex = 1, #evxPendingInit do
             if IsValid(evxPendingInit[evxPendingIndex]) then
                 evxInit(nil, evxPendingInit[evxPendingIndex])
             end
         end
 
-        for evxPendingIndex = 1, #evxPendingLateGiveDamage do
-            local p = evxPendingLateGiveDamage[evxPendingIndex]
-            evxConfig[p.type].lategivedamage(p.target, p.dmginfo)
-        end
-
         evxPendingInit = {}
-        evxPendingLateGiveDamage = {}
     end)
 end

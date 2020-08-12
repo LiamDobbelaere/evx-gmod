@@ -1,0 +1,45 @@
+"Refract"
+{
+ 	"$model" 1
+
+	"Refract_DX60"
+	{
+		"$fallbackmaterial" "models/props_lab/tank_glass001_dx60"
+	}
+ 	"$refractamount" "0"
+ 	"$bluramount" "0"
+	"$REFRACTTINT" "{255 255 255}"
+	"$scale" "[1 1]"
+	"$dudvmap" "dev/water_dudv"
+ 	"$normalmap" "dev/water_normal"
+ 	"$surfaceprop" "water"
+	"$dudvframe" "0"
+	"$bumpframe" "0"
+	"$fadeoutonsilhouette" "1"
+//	"$nocull" 1
+	"$REFRACTTINTTEXTURE" "evx/cloaked_tint"
+	"Proxies"
+	{
+		"AnimatedTexture"
+		{
+			"animatedtexturevar" "$dudvmap"
+			"animatedtextureframenumvar" "$dudvframe"
+			"animatedtextureframerate" 30.00
+		}
+
+		"AnimatedTexture"
+		{
+			"animatedtexturevar" "$normalmap"
+			"animatedtextureframenumvar" "$bumpframe"
+			"animatedtextureframerate" 30.00
+		}
+
+		"TextureScroll"
+		{
+			"texturescrollvar" "$bumptransform"
+			"texturescrollrate" .05
+			"texturescrollangle" 45.00
+		}
+
+	}
+}
