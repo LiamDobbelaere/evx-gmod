@@ -1,5 +1,49 @@
 AddCSLuaFile()
 
+-- shared
+local evxTypes = {
+    "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller"
+}
+local evxPendingInit = {}
+
+properties.Add("variants", {
+    MenuLabel = "Variants",
+    Order = 600,
+    MenuIcon = "icon16/bug.png",
+    Filter = function(self, ent, ply)
+        if (not IsValid(ent)) then return false end
+        if (not ent:IsNPC()) then return false end
+        if (not gamemode.Call("CanProperty", ply, "variants", ent)) then
+            return false
+        end
+
+        return true
+    end,
+    MenuOpen = function(self, option, ent, tr)
+        local submenu = option:AddSubMenu()
+
+        for k, v in pairs(evxTypes) do
+            submenu:AddOption(v, function() self:SetVariant(ent, v) end)
+        end
+    end,
+    Action = function(self, ent) end,
+    SetVariant = function(self, ent, variant)
+        self:MsgStart()
+        net.WriteEntity(ent)
+        net.WriteString(variant)
+        self:MsgEnd()
+    end,
+    Receive = function(self, length, player)
+        local ent = net.ReadEntity()
+        local variant = net.ReadString()
+
+        if (not self:Filter(ent, player)) then return end
+
+        ent.evxType = variant
+        table.insert(evxPendingInit, ent)
+    end
+})
+
 if SERVER then
     CreateConVar("evx_enabled", "1", FCVAR_NONE, "Enable enemy variations", 0, 1)
     CreateConVar("evx_affect_allies", "1", FCVAR_NONE,
@@ -37,10 +81,6 @@ if SERVER then
         ["monster_barney"] = 1,
         ["monster_cockroach"] = 1,
         ["monster_scientist"] = 1
-    }
-    local evxTypes = {
-        "explosion", "mother", "boss", "bigboss", "knockback", "cloaked",
-        "puller"
     }
     local evxChances = {
         ["nothing"] = 50,
@@ -176,10 +216,13 @@ if SERVER then
             givedamage = function(target, dmginfo)
                 if target:IsPlayer() or target:IsNPC() then
                     target:SetVelocity(dmginfo:GetDamageForce() * -1)
-                    target:Freeze(true)
-                    timer.Simple(.6, function()
-                        target:Freeze(false)
-                    end)
+                    -- stun effect
+                    if target:IsPlayer() then
+                        target:Freeze(true)
+                        timer.Simple(.6, function()
+                            target:Freeze(false)
+                        end)
+                    end
                 else
                     if IsValid(target:GetPhysicsObject()) then
                         target:GetPhysicsObject():SetVelocity(
@@ -203,9 +246,13 @@ if SERVER then
             end
         }
     }
-    local evxPendingInit = {}
 
     function evxInit(ply, ent)
+        -- reset these before a modifier changes it
+        ent:SetModelScale(1)
+        ent:SetHealth(ent:GetMaxHealth())
+        ent:SetMaterial("")
+
         if IsUsingColors() then
             ent:SetColor(evxConfig[ent.evxType].color)
         end
