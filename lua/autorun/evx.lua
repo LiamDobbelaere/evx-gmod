@@ -2,9 +2,42 @@ AddCSLuaFile()
 
 if SERVER then
     CreateConVar("evx_enabled", "1", FCVAR_NONE, "Enable enemy variations", 0, 1)
+    CreateConVar("evx_affect_allies", "1", FCVAR_NONE,
+                 "Include allies like Alyx, rebels or animals in getting variations",
+                 0, 1)
+    CreateConVar("evx_use_colors", "1", FCVAR_NONE,
+                 "Use colors on the NPC to indicate the type of variant they are",
+                 0, 1)
 
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
+    local function IsAffectingAllies()
+        return GetConVar("evx_affect_allies"):GetBool()
+    end
+    local function IsUsingColors()
+        return GetConVar("evx_use_colors"):GetBool()
+    end
 
+    local allies = {
+        ["npc_alyx"] = 1,
+        ["npc_magnusson"] = 1,
+        ["npc_breen"] = 1,
+        ["npc_kleiner"] = 1,
+        ["npc_barney"] = 1,
+        ["npc_crow"] = 1,
+        ["npc_dog"] = 1,
+        ["npc_eli"] = 1,
+        ["npc_gman"] = 1,
+        ["npc_monk"] = 1,
+        ["npc_mossman"] = 1,
+        ["npc_pigeon"] = 1,
+        ["npc_vortigaunt"] = 1,
+        ["npc_seagull"] = 1,
+        ["npc_citizen"] = 1,
+        ["npc_fisherman"] = 1,
+        ["monster_barney"] = 1,
+        ["monster_cockroach"] = 1,
+        ["monster_scientist"] = 1
+    }
     local evxTypes = {
         "explosion", "mother", "boss", "bigboss", "knockback", "cloaked"
     }
@@ -13,8 +46,8 @@ if SERVER then
         ["explosion"] = 40,
         ["knockback"] = 40,
         ["cloaked"] = 30,
-        ["boss"] = 20,
         ["mother"] = 20,
+        ["boss"] = 15,
         ["bigboss"] = 5
         -- ["mix2"] = 1000
     }
@@ -35,19 +68,14 @@ if SERVER then
         explosion = {
             color = Color(255, 0, 0, 255),
             spawn = function(ply, ent) end,
-            takedamage = function(target, dmginfo)
-                if target:Health() - dmginfo:GetDamage() <= 0 and
-                    (not target.evxExploded) then
-                    target.evxExploded = true
-                    dmginfo:SetDamageType(DMG_BURN)
-                    local explode = ents.Create("env_explosion") -- creates the explosion
-                    explode:SetPos(target:GetPos())
-                    -- this creates the explosion through your self.Owner:GetEyeTrace, which is why I put eyetrace in front
-                    explode:SetOwner(target) -- this sets you as the person who made the explosion
-                    explode:Spawn() -- this actually spawns the explosion
-                    explode:SetKeyValue("iMagnitude", "80") -- the magnitude
-                    explode:Fire("Explode", 0, 0)
-                end
+            takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor)
+                local explode = ents.Create("env_explosion")
+                explode:SetPos(ent:GetPos())
+                explode:SetOwner(ent)
+                explode:Spawn()
+                explode:SetKeyValue("iMagnitude", "80")
+                explode:Fire("Explode", 0, 0)
             end,
             givedamage = function(target, dmginfo) end
         },
@@ -55,9 +83,10 @@ if SERVER then
             color = Color(80, 80, 100, 255),
             spawn = function(ply, ent)
                 ent:SetModelScale(1.5)
-                ent:SetHealth(math.max(200, ent:Health()))
+                ent:SetHealth(ent:Health() * 8)
             end,
             takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(2)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
@@ -67,9 +96,10 @@ if SERVER then
             color = Color(0, 255, 255, 255),
             spawn = function(ply, ent)
                 ent:SetModelScale(2)
-                ent:SetHealth(math.max(400, ent:Health()))
+                ent:SetHealth(ent:Health() * 16)
             end,
             takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(4)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
@@ -78,42 +108,32 @@ if SERVER then
         mother = {
             color = Color(255, 255, 0, 255),
             spawn = function(ply, ent) ent:SetModelScale(1.5) end,
-            takedamage = function(target, dmginfo)
-                if target:Health() - dmginfo:GetDamage() <= 0 then
-                    local b1 = ents.Create(target:GetClass())
-                    b1:SetPos(target:GetPos() + Vector(-10, 0, 10))
-                    if IsValid(target:GetActiveWeapon()) then
-                        b1:Give(target:GetActiveWeapon():GetClass())
+            killed = function(ent, attacker, inflictor)
+                local bmin, bmax = ent:GetModelBounds()
+                local scale = ent:GetModelScale()
+                local positions = {
+                    Vector(-bmax.x * scale, 0, bmax.z * scale),
+                    Vector(bmax.x * scale, 0, bmax.z * scale),
+                    Vector(0, -bmax.y * scale, bmax.z * scale),
+                    Vector(0, bmax.y * scale, bmax.z * scale)
+                }
+
+                for i, position in ipairs(positions) do
+                    local baby = ents.Create(ent:GetClass())
+                    baby:SetPos(ent:GetPos() + position)
+
+                    if IsValid(ent:GetActiveWeapon()) then
+                        baby:Give(ent:GetActiveWeapon():GetClass())
                     end
-                    b1.evxType = "motherchild"
-                    evxInit(nil, b1)
-                    b1:Spawn()
-                    local b2 = ents.Create(target:GetClass())
-                    b2:SetPos(target:GetPos() + Vector(10, 0, 10))
-                    if IsValid(target:GetActiveWeapon()) then
-                        b2:Give(target:GetActiveWeapon():GetClass())
-                    end
-                    b2.evxType = "motherchild"
-                    evxInit(nil, b2)
-                    b2:Spawn()
-                    local b3 = ents.Create(target:GetClass())
-                    b3:SetPos(target:GetPos() + Vector(0, -10, 10))
-                    if IsValid(target:GetActiveWeapon()) then
-                        b3:Give(target:GetActiveWeapon():GetClass())
-                    end
-                    b3.evxType = "motherchild"
-                    evxInit(nil, b3)
-                    b3:Spawn()
-                    local b4 = ents.Create(target:GetClass())
-                    b4:SetPos(target:GetPos() + Vector(0, 10, 10))
-                    if IsValid(target:GetActiveWeapon()) then
-                        b4:Give(target:GetActiveWeapon():GetClass())
-                    end
-                    b4.evxType = "motherchild"
-                    evxInit(nil, b4)
-                    b4:Spawn()
+
+                    baby.evxType = "motherchild"
+                    baby:Spawn()
+                    baby:Activate()
+
+                    evxInit(nil, baby)
                 end
             end,
+            takedamage = function(target, dmginfo) end,
             givedamage = function(target, dmginfo) end
         },
         motherchild = {
@@ -123,6 +143,7 @@ if SERVER then
                 ent:SetHealth(ent:Health() / 3)
             end,
             takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(0.5)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 0.5)
@@ -132,6 +153,7 @@ if SERVER then
             color = Color(255, 0, 255, 255),
             spawn = function(ply, ent) end,
             takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 if target:IsPlayer() or target:IsNPC() then
                     target:SetVelocity(dmginfo:GetDamageForce() * 1.5) -- Vector(nrm.x * 300, nrm.y * 300, 400))
@@ -151,6 +173,7 @@ if SERVER then
                 ent:SetHealth(ent:Health() / 2)
             end,
             takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(1.5)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
@@ -160,17 +183,35 @@ if SERVER then
     local evxPendingInit = {}
 
     function evxInit(ply, ent)
-        ent:SetColor(evxConfig[ent.evxType].color)
+        if IsUsingColors() then
+            ent:SetColor(evxConfig[ent.evxType].color)
+        end
         evxConfig[ent.evxType].spawn(ply, ent)
 
         if ent.evxType2 then
-            ent:SetMaterial("models/shiny")
-            ent:SetColor(Color(255, 255, 255, 0))
+            if IsUsingColors() then
+                ent:SetMaterial("models/shiny")
+                ent:SetColor(Color(255, 255, 255, 0))
+            end
+
             evxConfig[ent.evxType2].spawn(ply, ent)
         end
     end
 
-    hook.Add("EntityTakeDamage", "EntityDamageExample",
+    hook.Add("OnNPCKilled", "EVXOnNPCKilled", function(ent, attacker, inflictor)
+        if not IsEvxEnabled() then return end
+
+        -- we're a ev-x enemy getting killed
+        if IsValid(ent) and ent.evxType then
+            evxConfig[ent.evxType].killed(ent, attacker, inflictor)
+
+            if ent.evxType2 then
+                evxConfig[ent.evxType2].killed(ent, attacker, inflictor)
+            end
+        end
+    end)
+
+    hook.Add("EntityTakeDamage", "EVXEntityTakeDamage",
              function(target, dmginfo)
         if not IsEvxEnabled() then return end
 
@@ -208,6 +249,11 @@ if SERVER then
         if not IsEvxEnabled() then return end
 
         if IsValid(ent) and ent:IsNPC() then
+            -- if they're an ally and the player doesn't want allies affected, bail out
+            if not IsAffectingAllies() and allies[ent:GetClass()] then
+                return
+            end
+
             -- Weighted random selection
             local randomWeight = math.random(weightSum)
             for k, v in pairs(evxChances) do
