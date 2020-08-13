@@ -39,12 +39,14 @@ if SERVER then
         ["monster_scientist"] = 1
     }
     local evxTypes = {
-        "explosion", "mother", "boss", "bigboss", "knockback", "cloaked"
+        "explosion", "mother", "boss", "bigboss", "knockback", "cloaked",
+        "puller"
     }
     local evxChances = {
         ["nothing"] = 50,
         ["explosion"] = 40,
         ["knockback"] = 40,
+        ["puller"] = 35,
         ["cloaked"] = 30,
         ["mother"] = 20,
         ["boss"] = 15,
@@ -156,11 +158,32 @@ if SERVER then
             killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 if target:IsPlayer() or target:IsNPC() then
-                    target:SetVelocity(dmginfo:GetDamageForce() * 1.5) -- Vector(nrm.x * 300, nrm.y * 300, 400))
+                    target:SetVelocity(dmginfo:GetDamageForce() * 1.5)
                 else
                     if IsValid(target:GetPhysicsObject()) then
                         target:GetPhysicsObject():SetVelocity(
-                            dmginfo:GetDamageForce() * 1.5) -- Vector(nrm.x * 300, nrm.y * 300, 400))
+                            dmginfo:GetDamageForce() * 1.5)
+                    end
+                end
+
+            end
+        },
+        puller = {
+            color = Color(0, 255, 0, 255),
+            spawn = function(ply, ent) end,
+            takedamage = function(target, dmginfo) end,
+            killed = function(ent, attacker, inflictor) end,
+            givedamage = function(target, dmginfo)
+                if target:IsPlayer() or target:IsNPC() then
+                    target:SetVelocity(dmginfo:GetDamageForce() * -1)
+                    target:Freeze(true)
+                    timer.Simple(.6, function()
+                        target:Freeze(false)
+                    end)
+                else
+                    if IsValid(target:GetPhysicsObject()) then
+                        target:GetPhysicsObject():SetVelocity(
+                            dmginfo:GetDamageForce() * -1)
                     end
                 end
 
