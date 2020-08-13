@@ -44,9 +44,9 @@ if SERVER then
     }
     local evxChances = {
         ["nothing"] = 50,
-        ["explosion"] = 40,
         ["knockback"] = 40,
         ["puller"] = 35,
+        ["explosion"] = 30,
         ["cloaked"] = 30,
         ["mother"] = 20,
         ["boss"] = 15,
