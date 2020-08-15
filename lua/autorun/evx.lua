@@ -426,7 +426,7 @@ if SERVER then
         ["nothing"] = GetSpawnRateFor("nothing"),
         ["lifesteal"] = GetSpawnRateFor("lifesteal"),
         ["metal"] = GetSpawnRateFor("metal"),
-        ["gnome"] = GetSpawnRateFor("gnomed"),
+        ["gnome"] = GetSpawnRateFor("gnome"),
         ["knockback"] = GetSpawnRateFor("knockback"),
         ["puller"] = GetSpawnRateFor("puller"),
         ["pyro"] = GetSpawnRateFor("pyro"),
