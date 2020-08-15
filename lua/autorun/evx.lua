@@ -1,8 +1,11 @@
 AddCSLuaFile()
 
 -- shared
+local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
+
 local evxTypes = {
-    "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller"
+    "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
+    "rogue"
 }
 local evxPendingInit = {}
 
@@ -109,8 +112,6 @@ if SERVER then
     local evxConfig = {
         explosion = {
             color = Color(255, 0, 0, 255),
-            spawn = function(ply, ent) end,
-            takedamage = function(target, dmginfo) end,
             killed = function(ent, attacker, inflictor)
                 local explode = ents.Create("env_explosion")
                 explode:SetPos(ent:GetPos())
@@ -118,8 +119,18 @@ if SERVER then
                 explode:Spawn()
                 explode:SetKeyValue("iMagnitude", "80")
                 explode:Fire("Explode", 0, 0)
-            end,
-            givedamage = function(target, dmginfo) end
+            end
+        },
+        rogue = {
+            color = Color(128, 255, 0, 255),
+            spawn = function(ply, ent)
+                local enemies = ents.FindByClass("npc_*")
+                for _, enemy in pairs(enemies) do
+                    if not enemy:IsNPC() then return end
+                    enemy:AddEntityRelationship(ent, D_HT, 99)
+                    ent:AddEntityRelationship(enemy, D_HT, 99)
+                end
+            end
         },
         boss = {
             color = Color(80, 80, 100, 255),
@@ -127,8 +138,6 @@ if SERVER then
                 ent:SetModelScale(1.5)
                 ent:SetHealth(ent:Health() * 8)
             end,
-            takedamage = function(target, dmginfo) end,
-            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(2)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
@@ -140,8 +149,6 @@ if SERVER then
                 ent:SetModelScale(2)
                 ent:SetHealth(ent:Health() * 16)
             end,
-            takedamage = function(target, dmginfo) end,
-            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(4)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
@@ -174,9 +181,7 @@ if SERVER then
 
                     evxInit(nil, baby)
                 end
-            end,
-            takedamage = function(target, dmginfo) end,
-            givedamage = function(target, dmginfo) end
+            end
         },
         motherchild = {
             color = Color(255, 128, 0, 255),
@@ -184,8 +189,6 @@ if SERVER then
                 ent:SetModelScale(0.5)
                 ent:SetHealth(ent:Health() / 3)
             end,
-            takedamage = function(target, dmginfo) end,
-            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(0.5)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 0.5)
@@ -193,9 +196,6 @@ if SERVER then
         },
         knockback = {
             color = Color(255, 0, 255, 255),
-            spawn = function(ply, ent) end,
-            takedamage = function(target, dmginfo) end,
-            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 if target:IsPlayer() or target:IsNPC() then
                     target:SetVelocity(dmginfo:GetDamageForce() * 1.5)
@@ -210,9 +210,6 @@ if SERVER then
         },
         puller = {
             color = Color(0, 255, 0, 255),
-            spawn = function(ply, ent) end,
-            takedamage = function(target, dmginfo) end,
-            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 if target:IsPlayer() or target:IsNPC() then
                     target:SetVelocity(dmginfo:GetDamageForce() * -1)
@@ -238,8 +235,6 @@ if SERVER then
                 ent:SetMaterial("evx/cloaked")
                 ent:SetHealth(ent:Health() / 2)
             end,
-            takedamage = function(target, dmginfo) end,
-            killed = function(ent, attacker, inflictor) end,
             givedamage = function(target, dmginfo)
                 dmginfo:ScaleDamage(1.5)
                 dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
@@ -256,7 +251,7 @@ if SERVER then
         if IsUsingColors() then
             ent:SetColor(evxConfig[ent.evxType].color)
         end
-        evxConfig[ent.evxType].spawn(ply, ent)
+        safeCall(evxConfig[ent.evxType].spawn, ply, ent)
 
         if ent.evxType2 then
             if IsUsingColors() then
@@ -264,7 +259,7 @@ if SERVER then
                 ent:SetColor(Color(255, 255, 255, 0))
             end
 
-            evxConfig[ent.evxType2].spawn(ply, ent)
+            safeCall(evxConfig[ent.evxType2].spawn, ply, ent)
         end
     end
 
@@ -273,10 +268,11 @@ if SERVER then
 
         -- we're a ev-x enemy getting killed
         if IsValid(ent) and ent.evxType then
-            evxConfig[ent.evxType].killed(ent, attacker, inflictor)
+            safeCall(evxConfig[ent.evxType].killed, ent, attacker, inflictor)
 
             if ent.evxType2 then
-                evxConfig[ent.evxType2].killed(ent, attacker, inflictor)
+                safeCall(evxConfig[ent.evxType2].killed, ent, attacker,
+                         inflictor)
             end
         end
     end)
@@ -287,21 +283,22 @@ if SERVER then
 
         -- we're a ev-x enemy taking damage
         if IsValid(target) and target.evxType then
-            evxConfig[target.evxType].takedamage(target, dmginfo)
+            safeCall(evxConfig[target.evxType].takedamage, target, dmginfo)
 
             if target.evxType2 then
-                evxConfig[target.evxType2].takedamage(target, dmginfo)
+                safeCall(evxConfig[target.evxType2].takedamage, target, dmginfo)
             end
         end
 
         -- we're an entity taking damage from an ev-x enemy
         if IsValid(target) and IsEntity(target) and
             IsValid(dmginfo:GetAttacker()) and dmginfo:GetAttacker().evxType then
-            evxConfig[dmginfo:GetAttacker().evxType].givedamage(target, dmginfo)
+            safeCall(evxConfig[dmginfo:GetAttacker().evxType].givedamage,
+                     target, dmginfo)
 
             if dmginfo:GetAttacker().evxType2 then
-                evxConfig[dmginfo:GetAttacker().evxType2].givedamage(target,
-                                                                     dmginfo)
+                safeCall(evxConfig[dmginfo:GetAttacker().evxType2].givedamage,
+                         target, dmginfo)
             end
         end
     end)
