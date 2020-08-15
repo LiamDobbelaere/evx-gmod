@@ -9,12 +9,13 @@ local evxTypes = {
 }
 local evxPendingInit = {}
 -- possible evx properties and hooks:
--- color - ev-x enemy color
--- spawn(ent) - ev-x enemy spawn function 
+-- color - ev-x NPC color
+-- spawn(ent) - ev-x NPC spawn function 
 -- entitycreated(npc, ent) - react to ANY entity being made on the map (npc = ourselves)
--- takedamage(target, dmginfo) - ev-x enemy is taking damage
--- givedamage(target, dmginfo) - ev-x enemy is giving damage
--- killed(ent, attacker, inflictor) - ev-x enemy was killed
+-- takedamage(target, dmginfo) - ev-x NPC is taking damage
+-- givedamage(target, dmginfo) - ev-x NPC is giving damage
+-- tick(ent) - ev-x tick, ent is the ev-x NPC itself
+-- killed(ent, attacker, inflictor) - ev-x NPC was killed
 local evxConfig = {
     explosion = {
         color = Color(255, 0, 0, 255),
@@ -26,6 +27,51 @@ local evxConfig = {
             explode:SetKeyValue("iMagnitude", "80")
             explode:Fire("Explode", 0, 0)
         end
+    },
+    spidersack = {
+        color = Color(255, 255, 255, 255),
+        spawn = function(ent) end,
+        killed = function(ent, attacker, inflictor)
+            local bmin, bmax = ent:GetModelBounds()
+            local scale = ent:GetModelScale()
+
+            for i = -5, 5 do
+                for j = -5, 5 do
+                    local baby = ents.Create("npc_headcrab_fast")
+                    baby:SetPos(ent:GetPos() +
+                                    Vector(i * bmax.x * scale,
+                                           j * bmax.y * scale, 0))
+
+                    if IsValid(ent:GetActiveWeapon()) then
+                        baby:Give(ent:GetActiveWeapon():GetClass())
+                    end
+
+                    baby:SetNWString("evxType", "spiderbaby")
+                    baby:Spawn()
+                    baby:Activate()
+
+                    table.insert(evxPendingInit, baby)
+                end
+            end
+        end
+    },
+    spiderbaby = {
+        color = Color(0, 0, 0, 255),
+        spawn = function(ent)
+            ent:SetModelScale(0.2)
+            ent:SetHealth(1)
+        end,
+        tick = function(ent) ent:SetPlaybackRate(100) end,
+        givedamage = function(target, dmginfo) dmginfo:SetDamage(1) end
+    },
+    possessed = {
+        -- https://www.youtube.com/watch?v=vFCwjkKWOdw
+        -- horror 2 on hurt
+        -- horror 1 on sight
+        -- horror 3 on death
+        -- horror 4 on attack
+        color = Color(10, 10, 10, 255),
+        tick = function() ent:SetPlaybackRate(100) end
     },
     rogue = {
         color = Color(0, 0, 255, 255),
@@ -142,17 +188,17 @@ local evxConfig = {
             local bmin, bmax = ent:GetModelBounds()
             local scale = ent:GetModelScale()
             local positions = {
-                Vector(-bmax.x * scale, 0, bmax.z * scale),
-                Vector(bmax.x * scale, 0, bmax.z * scale),
-                Vector(0, -bmax.y * scale, bmax.z * scale),
-                Vector(0, bmax.y * scale, bmax.z * scale)
+                Vector(-bmax.x * scale, bmax.y * scale, 0),
+                Vector(bmax.x * scale, bmax.y * scale, 0),
+                Vector(-bmax.x * scale, -bmax.y * scale, 0),
+                Vector(bmax.x * scale, -bmax.y * scale, 0)
             }
 
             for i, position in ipairs(positions) do
                 local baby = ents.Create(ent:GetClass())
                 baby:SetPos(ent:GetPos() + position)
 
-                if IsValid(ent:GetActiveWeapon()) then
+                if ent:IsNPC() and IsValid(ent:GetActiveWeapon()) then
                     baby:Give(ent:GetActiveWeapon():GetClass())
                 end
 
@@ -160,7 +206,7 @@ local evxConfig = {
                 baby:Spawn()
                 baby:Activate()
 
-                evxInit(baby)
+                table.insert(evxPendingInit, baby)
             end
         end
     },
@@ -278,14 +324,14 @@ if CLIENT then
         local font = "TargetID"
         local evxType = ""
 
-        if trace.Entity:IsNPC() and trace.Entity:GetNWString("evxType", false) then
+        if trace.Entity:GetNWString("evxType", false) then
             text = string.upper(trace.Entity:GetNWString("evxType"))
             evxType = trace.Entity:GetNWString("evxType")
         else
             return
         end
 
-        if evxType == "cloaked" then return end
+        if evxType == "cloaked" or evxType == "spiderbaby" then return end
 
         surface.SetFont(font)
         local w, h = surface.GetTextSize(text)
@@ -422,6 +468,18 @@ if SERVER then
         ["monster_cockroach"] = 1,
         ["monster_scientist"] = 1
     }
+
+    -- TODO NPC variation exclusions:
+    -- copy chances table
+    -- remove bad variations for this npc
+    -- subtract removed weights from the weightsum 
+    -- use new weightsum and new chances table
+
+    -- Jerkakame
+    -- infected variant
+    -- that spawns a headcrab
+    -- the headcrab infects others
+
     local evxChances = {
         ["nothing"] = GetSpawnRateFor("nothing"),
         ["lifesteal"] = GetSpawnRateFor("lifesteal"),
@@ -453,6 +511,7 @@ if SERVER then
     for k, v in pairs(evxChancesType2) do weightSumType2 = weightSumType2 + v end
 
     local evxNPCs = {}
+    local evxTickNPCs = {}
 
     function evxInit(ent)
         -- reset these before a modifier changes it
@@ -475,6 +534,10 @@ if SERVER then
         end
 
         evxNPCs[ent] = true
+
+        if evxConfig[ent:GetNWString("evxType")].tick ~= nil then
+            evxTickNPCs[ent] = true
+        end
     end
 
     hook.Add("OnNPCKilled", "EVXOnNPCKilled", function(ent, attacker, inflictor)
@@ -491,12 +554,14 @@ if SERVER then
             end
 
             evxNPCs[ent] = nil
+            evxTickNPCs[ent] = nil
         end
     end)
 
     hook.Add("EntityRemoved", "EVXEntityRemoved", function(ent)
         if IsValid(ent) and ent:GetNWString("evxType", false) then
             evxNPCs[ent] = nil
+            evxTickNPCs[ent] = nil
         end
     end)
 
@@ -585,6 +650,12 @@ if SERVER then
         for evxPendingIndex = 1, #evxPendingInit do
             if IsValid(evxPendingInit[evxPendingIndex]) then
                 evxInit(evxPendingInit[evxPendingIndex])
+            end
+        end
+
+        for evxNPC, _ in pairs(evxTickNPCs) do
+            if IsValid(evxNPC) then
+                safeCall(evxConfig[evxNPC:GetNWString("evxType")].tick, evxNPC)
             end
         end
 
