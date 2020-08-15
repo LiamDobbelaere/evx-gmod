@@ -5,7 +5,7 @@ local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "rogue", "pyro", "lifesteal"
+    "rogue", "pyro", "lifesteal", "metal", "gnome"
 }
 local evxPendingInit = {}
 -- possible evx properties and hooks:
@@ -53,6 +53,34 @@ local evxConfig = {
             ent:CapabilitiesClear()
             if IsValid(ent:GetPhysicsObject()) then
                 ent:GetPhysicsObject():EnableMotion(false)
+            end
+        end
+    },
+    metal = {
+        color = Color(255, 255, 255, 255),
+        spawn = function(ent) ent:SetMaterial("debug/env_cubemap_model") end,
+        takedamage = function(target, dmginfo)
+            if not dmginfo:IsDamageType(DMG_BLAST) then
+                dmginfo:ScaleDamage(0)
+            end
+            dmginfo:SetDamageType(DMG_SHOCK)
+        end
+    },
+    gnome = {
+        color = Color(0, 128, 255, 255),
+        spawn = function(ent)
+            ent:SetModelScale(0.4)
+            ent:SetHealth(ent:Health() / 4)
+        end,
+        givedamage = function(target, dmginfo)
+            if target:IsPlayer() or target:IsNPC() then
+                if target:Health() > 1 then
+                    dmginfo:SetDamage(target:Health() - 1)
+                    dmginfo:GetInflictor():EmitSound(Sound("evx/gnomed.wav"),
+                                                     70, 100)
+                else
+                    dmginfo:ScaleDamage(0)
+                end
             end
         end
     },
@@ -297,7 +325,7 @@ if CLIENT then
 
         y = y + h + 5
 
-        local text = trace.Entity:Health()
+        local text = trace.Entity:Health() .. " HP"
         local font = "TargetID"
 
         surface.SetFont(font)
@@ -349,6 +377,12 @@ if SERVER then
     CreateConVar("evx_rate_bigboss", "5", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the bigboss ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_rate_metal", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the metal ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_gnome", "2", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the gnome ev-x modifier in enemies", 0,
+                 100000)
     concommand.Add("evx_rate_reset_all", function()
         GetConVar("evx_rate_nothing"):Revert()
         for _, v in pairs(evxTypes) do
@@ -391,6 +425,8 @@ if SERVER then
     local evxChances = {
         ["nothing"] = GetSpawnRateFor("nothing"),
         ["lifesteal"] = GetSpawnRateFor("lifesteal"),
+        ["metal"] = GetSpawnRateFor("metal"),
+        ["gnome"] = GetSpawnRateFor("gnomed"),
         ["knockback"] = GetSpawnRateFor("knockback"),
         ["puller"] = GetSpawnRateFor("puller"),
         ["pyro"] = GetSpawnRateFor("pyro"),
