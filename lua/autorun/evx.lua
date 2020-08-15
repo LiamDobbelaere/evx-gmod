@@ -86,6 +86,7 @@ if SERVER then
         ["monster_scientist"] = 1
     }
     local evxChances = {
+        ["rogue"] = 10000,
         ["nothing"] = 50,
         ["knockback"] = 40,
         ["puller"] = 35,
@@ -109,6 +110,15 @@ if SERVER then
     local weightSumType2 = 0
     for k, v in pairs(evxChancesType2) do weightSumType2 = weightSumType2 + v end
 
+    local evxNPCs = {}
+
+    -- possible evx properties and hooks:
+    -- color - ev-x enemy color
+    -- spawn(ent) - ev-x enemy spawn function 
+    -- entitycreated(npc, ent) - react to ANY entity being made on the map (npc = ourselves)
+    -- takedamage(target, dmginfo) - ev-x enemy is taking damage
+    -- givedamage(target, dmginfo) - ev-x enemy is giving damage
+    -- killed(ent, attacker, inflictor) - ev-x enemy was killed
     local evxConfig = {
         explosion = {
             color = Color(255, 0, 0, 255),
@@ -122,11 +132,20 @@ if SERVER then
             end
         },
         rogue = {
-            color = Color(128, 255, 0, 255),
-            spawn = function(ply, ent)
+            color = Color(0, 0, 255, 255),
+            entitycreated = function(npc, ent)
+                if not ent:IsNPC() or ent:GetClass() == npc:GetClass() then
+                    return
+                end
+                npc:AddEntityRelationship(ent, D_HT, 99)
+                ent:AddEntityRelationship(npc, D_HT, 99)
+            end,
+            spawn = function(ent)
                 local enemies = ents.FindByClass("npc_*")
                 for _, enemy in pairs(enemies) do
-                    if not enemy:IsNPC() then return end
+                    if not enemy:IsNPC() or enemy:GetClass() == ent:GetClass() then
+                        return
+                    end
                     enemy:AddEntityRelationship(ent, D_HT, 99)
                     ent:AddEntityRelationship(enemy, D_HT, 99)
                 end
@@ -134,7 +153,7 @@ if SERVER then
         },
         boss = {
             color = Color(80, 80, 100, 255),
-            spawn = function(ply, ent)
+            spawn = function(ent)
                 ent:SetModelScale(1.5)
                 ent:SetHealth(ent:Health() * 8)
             end,
@@ -145,7 +164,7 @@ if SERVER then
         },
         bigboss = {
             color = Color(0, 255, 255, 255),
-            spawn = function(ply, ent)
+            spawn = function(ent)
                 ent:SetModelScale(2)
                 ent:SetHealth(ent:Health() * 16)
             end,
@@ -156,7 +175,7 @@ if SERVER then
         },
         mother = {
             color = Color(255, 255, 0, 255),
-            spawn = function(ply, ent) ent:SetModelScale(1.5) end,
+            spawn = function(ent) ent:SetModelScale(1.5) end,
             killed = function(ent, attacker, inflictor)
                 local bmin, bmax = ent:GetModelBounds()
                 local scale = ent:GetModelScale()
@@ -179,13 +198,13 @@ if SERVER then
                     baby:Spawn()
                     baby:Activate()
 
-                    evxInit(nil, baby)
+                    evxInit(baby)
                 end
             end
         },
         motherchild = {
             color = Color(255, 128, 0, 255),
-            spawn = function(ply, ent)
+            spawn = function(ent)
                 ent:SetModelScale(0.5)
                 ent:SetHealth(ent:Health() / 3)
             end,
@@ -231,7 +250,7 @@ if SERVER then
         },
         cloaked = {
             color = Color(255, 255, 255, 255),
-            spawn = function(ply, ent)
+            spawn = function(ent)
                 ent:SetMaterial("evx/cloaked")
                 ent:SetHealth(ent:Health() / 2)
             end,
@@ -242,7 +261,7 @@ if SERVER then
         }
     }
 
-    function evxInit(ply, ent)
+    function evxInit(ent)
         -- reset these before a modifier changes it
         ent:SetModelScale(1)
         ent:SetHealth(ent:GetMaxHealth())
@@ -251,7 +270,7 @@ if SERVER then
         if IsUsingColors() then
             ent:SetColor(evxConfig[ent.evxType].color)
         end
-        safeCall(evxConfig[ent.evxType].spawn, ply, ent)
+        safeCall(evxConfig[ent.evxType].spawn, ent)
 
         if ent.evxType2 then
             if IsUsingColors() then
@@ -259,8 +278,10 @@ if SERVER then
                 ent:SetColor(Color(255, 255, 255, 0))
             end
 
-            safeCall(evxConfig[ent.evxType2].spawn, ply, ent)
+            safeCall(evxConfig[ent.evxType2].spawn, ent)
         end
+
+        evxNPCs[ent] = true
     end
 
     hook.Add("OnNPCKilled", "EVXOnNPCKilled", function(ent, attacker, inflictor)
@@ -274,7 +295,13 @@ if SERVER then
                 safeCall(evxConfig[ent.evxType2].killed, ent, attacker,
                          inflictor)
             end
+
+            evxNPCs[ent] = nil
         end
+    end)
+
+    hook.Add("EntityRemoved", "EVXEntityRemoved", function(ent)
+        if IsValid(ent) and ent.evxType then evxNPCs[ent] = nil end
     end)
 
     hook.Add("EntityTakeDamage", "EVXEntityTakeDamage",
@@ -315,6 +342,12 @@ if SERVER then
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", function(ent)
         if not IsEvxEnabled() then return end
 
+        for evxNPC, _ in pairs(evxNPCs) do
+            if IsValid(evxNPC) and evxNPC:IsNPC() and evxNPC.evxType then
+                safeCall(evxConfig[evxNPC.evxType].entitycreated, evxNPC, ent)
+            end
+        end
+
         if IsValid(ent) and ent:IsNPC() then
             -- if they're an ally and the player doesn't want allies affected, bail out
             if not IsAffectingAllies() and allies[ent:GetClass()] then
@@ -349,7 +382,7 @@ if SERVER then
 
         for evxPendingIndex = 1, #evxPendingInit do
             if IsValid(evxPendingInit[evxPendingIndex]) then
-                evxInit(nil, evxPendingInit[evxPendingIndex])
+                evxInit(evxPendingInit[evxPendingIndex])
             end
         end
 
