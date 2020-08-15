@@ -607,6 +607,22 @@ if SERVER then
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", function(ent)
         if not IsEvxEnabled() then return end
 
+        -- if ent:GetClass() == "prop_physics" then
+        -- spider baby
+        --    local baby = ents.Create("npc_headcrab_fast")
+        --    timer.Simple(1, function()
+        --        if IsValid(baby) and IsValid(ent) then
+        --            baby:SetPos(ent:GetPos())
+        --        end
+        --    end)
+
+        --    baby:SetNWString("evxType", "spiderbaby")
+        --    baby:Spawn()
+        --    baby:Activate()
+
+        --    table.insert(evxPendingInit, baby)
+        -- end
+
         for evxNPC, _ in pairs(evxNPCs) do
             if IsValid(evxNPC) and evxNPC:IsNPC() and
                 evxNPC:GetNWString("evxType", false) then
