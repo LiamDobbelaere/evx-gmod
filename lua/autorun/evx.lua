@@ -5,7 +5,7 @@ local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "rogue"
+    "rogue", "pyro", "lifesteal"
 }
 local evxPendingInit = {}
 
@@ -48,13 +48,50 @@ properties.Add("variants", {
 })
 
 if SERVER then
-    CreateConVar("evx_enabled", "1", FCVAR_NONE, "Enable enemy variations", 0, 1)
-    CreateConVar("evx_affect_allies", "1", FCVAR_NONE,
+    CreateConVar("evx_enabled", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Enable enemy variations", 0, 1)
+    CreateConVar("evx_affect_allies", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Include allies like Alyx, rebels or animals in getting variations",
                  0, 1)
-    CreateConVar("evx_use_colors", "1", FCVAR_NONE,
+    CreateConVar("evx_use_colors", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Use colors on the NPC to indicate the type of variant they are",
                  0, 1)
+    CreateConVar("evx_rate_nothing", "50", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the 'no' ev-x modifier in enemies", 0, 100000)
+    CreateConVar("evx_rate_knockback", "40", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the knockback ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_puller", "35", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the puller ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_pyro", "35", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the pyro ev-x modifier in enemies", 0, 100000)
+    CreateConVar("evx_rate_lifesteal", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the lifesteal ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_explosion", "30", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the explosion ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_cloaked", "30", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the cloaked ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_mother", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the mother ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_boss", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the boss ev-x modifier in enemies", 0, 100000)
+    CreateConVar("evx_rate_rogue", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the rogue ev-x modifier in enemies", 0,
+                 100000)
+    CreateConVar("evx_rate_bigboss", "5", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the bigboss ev-x modifier in enemies", 0,
+                 100000)
+    concommand.Add("evx_rate_reset_all", function()
+        GetConVar("evx_rate_nothing"):Revert()
+        for _, v in pairs(evxTypes) do
+            GetConVar("evx_rate_" .. v):Revert()
+        end
+    end)
 
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
     local function IsAffectingAllies()
@@ -62,6 +99,9 @@ if SERVER then
     end
     local function IsUsingColors()
         return GetConVar("evx_use_colors"):GetBool()
+    end
+    local function GetSpawnRateFor(type)
+        return GetConVar("evx_rate_" .. type):GetInt()
     end
 
     local allies = {
@@ -86,15 +126,18 @@ if SERVER then
         ["monster_scientist"] = 1
     }
     local evxChances = {
-        ["rogue"] = 10000,
-        ["nothing"] = 50,
-        ["knockback"] = 40,
-        ["puller"] = 35,
-        ["explosion"] = 30,
-        ["cloaked"] = 30,
-        ["mother"] = 20,
-        ["boss"] = 15,
-        ["bigboss"] = 5
+        ["nothing"] = GetSpawnRateFor("nothing"),
+        ["lifesteal"] = GetSpawnRateFor("lifesteal"),
+        ["knockback"] = GetSpawnRateFor("knockback"),
+        ["puller"] = GetSpawnRateFor("puller"),
+        ["pyro"] = GetSpawnRateFor("pyro"),
+        ["explosion"] = GetSpawnRateFor("explosion"),
+        ["cloaked"] = GetSpawnRateFor("cloaked"),
+        ["mother"] = GetSpawnRateFor("mother"),
+        ["boss"] = GetSpawnRateFor("boss"),
+        ["rogue"] = GetSpawnRateFor("rogue"),
+        ["bigboss"] = GetSpawnRateFor("bigboss")
+        -- ["turret"] = 10000,
         -- ["mix2"] = 1000
     }
     local weightSum = 0
@@ -148,6 +191,45 @@ if SERVER then
                     end
                     enemy:AddEntityRelationship(ent, D_HT, 99)
                     ent:AddEntityRelationship(enemy, D_HT, 99)
+                end
+            end
+        },
+        turret = {
+            color = Color(128, 128, 128, 255),
+            spawn = function(ent)
+                ent:CapabilitiesClear()
+                if IsValid(ent:GetPhysicsObject()) then
+                    ent:GetPhysicsObject():EnableMotion(false)
+                end
+            end
+        },
+        pyro = {
+            color = Color(255, 128, 0, 255),
+            givedamage = function(target, dmginfo)
+                if target:IsPlayer() or target:IsNPC() or
+                    IsValid(target:GetPhysicsObject()) then
+                    target:Ignite(1.5)
+                end
+            end
+        },
+        lifesteal = {
+            color = Color(0, 255, 130, 255),
+            givedamage = function(target, dmginfo)
+                local attacker = dmginfo:GetInflictor()
+
+                if target:IsPlayer() or target:IsNPC() then
+                    if IsValid(attacker) and attacker:IsNPC() then
+                        local lifestealDamage = dmginfo:GetDamage() * 2
+                        if attacker:Health() < attacker:GetMaxHealth() then
+                            attacker:SetHealth(
+                                math.min(attacker:Health() + lifestealDamage,
+                                         attacker:GetMaxHealth()))
+                            attacker:EmitSound(Sound("items/medshot4.wav"), 75,
+                                               80)
+
+                        end
+                        print(attacker:Health())
+                    end
                 end
             end
         },
@@ -235,7 +317,7 @@ if SERVER then
                     -- stun effect
                     if target:IsPlayer() then
                         target:Freeze(true)
-                        timer.Simple(.6, function()
+                        timer.Simple(.3, function()
                             target:Freeze(false)
                         end)
                     end
