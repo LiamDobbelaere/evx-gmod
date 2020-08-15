@@ -8,6 +8,192 @@ local evxTypes = {
     "rogue", "pyro", "lifesteal"
 }
 local evxPendingInit = {}
+-- possible evx properties and hooks:
+-- color - ev-x enemy color
+-- spawn(ent) - ev-x enemy spawn function 
+-- entitycreated(npc, ent) - react to ANY entity being made on the map (npc = ourselves)
+-- takedamage(target, dmginfo) - ev-x enemy is taking damage
+-- givedamage(target, dmginfo) - ev-x enemy is giving damage
+-- killed(ent, attacker, inflictor) - ev-x enemy was killed
+local evxConfig = {
+    explosion = {
+        color = Color(255, 0, 0, 255),
+        killed = function(ent, attacker, inflictor)
+            local explode = ents.Create("env_explosion")
+            explode:SetPos(ent:GetPos())
+            explode:SetOwner(ent)
+            explode:Spawn()
+            explode:SetKeyValue("iMagnitude", "80")
+            explode:Fire("Explode", 0, 0)
+        end
+    },
+    rogue = {
+        color = Color(0, 0, 255, 255),
+        entitycreated = function(npc, ent)
+            if not ent:IsNPC() or ent:GetClass() == npc:GetClass() then
+                return
+            end
+            npc:AddEntityRelationship(ent, D_HT, 99)
+            ent:AddEntityRelationship(npc, D_HT, 99)
+        end,
+        spawn = function(ent)
+            local enemies = ents.FindByClass("npc_*")
+            for _, enemy in pairs(enemies) do
+                if not enemy:IsNPC() or enemy:GetClass() == ent:GetClass() then
+                    return
+                end
+                enemy:AddEntityRelationship(ent, D_HT, 99)
+                ent:AddEntityRelationship(enemy, D_HT, 99)
+            end
+        end
+    },
+    turret = {
+        color = Color(128, 128, 128, 255),
+        spawn = function(ent)
+            ent:CapabilitiesClear()
+            if IsValid(ent:GetPhysicsObject()) then
+                ent:GetPhysicsObject():EnableMotion(false)
+            end
+        end
+    },
+    pyro = {
+        color = Color(255, 128, 0, 255),
+        givedamage = function(target, dmginfo)
+            if target:IsPlayer() or target:IsNPC() or
+                IsValid(target:GetPhysicsObject()) then
+                target:Ignite(1.5)
+            end
+        end
+    },
+    lifesteal = {
+        color = Color(0, 255, 130, 255),
+        givedamage = function(target, dmginfo)
+            local attacker = dmginfo:GetInflictor()
+
+            if target:IsPlayer() or target:IsNPC() then
+                if IsValid(attacker) and attacker:IsNPC() then
+                    local lifestealDamage = dmginfo:GetDamage() * 2
+                    if attacker:Health() < attacker:GetMaxHealth() then
+                        attacker:SetHealth(
+                            math.min(attacker:Health() + lifestealDamage,
+                                     attacker:GetMaxHealth()))
+                        attacker:EmitSound(Sound("items/medshot4.wav"), 75, 80)
+
+                    end
+                    print(attacker:Health())
+                end
+            end
+        end
+    },
+    boss = {
+        color = Color(80, 80, 100, 255),
+        spawn = function(ent)
+            ent:SetModelScale(1.5)
+            ent:SetHealth(ent:Health() * 8)
+        end,
+        givedamage = function(target, dmginfo)
+            dmginfo:ScaleDamage(2)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
+        end
+    },
+    bigboss = {
+        color = Color(0, 255, 255, 255),
+        spawn = function(ent)
+            ent:SetModelScale(2)
+            ent:SetHealth(ent:Health() * 16)
+        end,
+        givedamage = function(target, dmginfo)
+            dmginfo:ScaleDamage(4)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
+        end
+    },
+    mother = {
+        color = Color(255, 255, 0, 255),
+        spawn = function(ent) ent:SetModelScale(1.5) end,
+        killed = function(ent, attacker, inflictor)
+            local bmin, bmax = ent:GetModelBounds()
+            local scale = ent:GetModelScale()
+            local positions = {
+                Vector(-bmax.x * scale, 0, bmax.z * scale),
+                Vector(bmax.x * scale, 0, bmax.z * scale),
+                Vector(0, -bmax.y * scale, bmax.z * scale),
+                Vector(0, bmax.y * scale, bmax.z * scale)
+            }
+
+            for i, position in ipairs(positions) do
+                local baby = ents.Create(ent:GetClass())
+                baby:SetPos(ent:GetPos() + position)
+
+                if IsValid(ent:GetActiveWeapon()) then
+                    baby:Give(ent:GetActiveWeapon():GetClass())
+                end
+
+                baby:SetNWString("evxType", "motherchild")
+                baby:Spawn()
+                baby:Activate()
+
+                evxInit(baby)
+            end
+        end
+    },
+    motherchild = {
+        color = Color(255, 128, 0, 255),
+        spawn = function(ent)
+            ent:SetModelScale(0.5)
+            ent:SetHealth(ent:Health() / 3)
+        end,
+        givedamage = function(target, dmginfo)
+            dmginfo:ScaleDamage(0.5)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 0.5)
+        end
+    },
+    knockback = {
+        color = Color(255, 0, 255, 255),
+        givedamage = function(target, dmginfo)
+            if target:IsPlayer() or target:IsNPC() then
+                target:SetVelocity(dmginfo:GetDamageForce() * 1.5)
+            else
+                if IsValid(target:GetPhysicsObject()) then
+                    target:GetPhysicsObject():SetVelocity(
+                        dmginfo:GetDamageForce() * 1.5)
+                end
+            end
+
+        end
+    },
+    puller = {
+        color = Color(0, 255, 0, 255),
+        givedamage = function(target, dmginfo)
+            if target:IsPlayer() or target:IsNPC() then
+                target:SetVelocity(dmginfo:GetDamageForce() * -1)
+                -- stun effect
+                if target:IsPlayer() then
+                    target:Freeze(true)
+                    timer.Simple(.3, function()
+                        target:Freeze(false)
+                    end)
+                end
+            else
+                if IsValid(target:GetPhysicsObject()) then
+                    target:GetPhysicsObject():SetVelocity(
+                        dmginfo:GetDamageForce() * -1)
+                end
+            end
+
+        end
+    },
+    cloaked = {
+        color = Color(255, 255, 255, 255),
+        spawn = function(ent)
+            ent:SetMaterial("evx/cloaked")
+            ent:SetHealth(ent:Health() / 2)
+        end,
+        givedamage = function(target, dmginfo)
+            dmginfo:ScaleDamage(1.5)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
+        end
+    }
+}
 
 properties.Add("variants", {
     MenuLabel = "Variants",
@@ -42,10 +228,87 @@ properties.Add("variants", {
 
         if (not self:Filter(ent, player)) then return end
 
-        ent.evxType = variant
+        ent:SetNWString("evxType", variant)
         table.insert(evxPendingInit, ent)
     end
 })
+
+if CLIENT then
+    CreateClientConVar("evx_draw_hud", "1", true, false,
+                       "Disable drawing the ev-x hud, like displaying NPC health and type",
+                       0, 1)
+
+    hook.Add("HUDPaint", "HUDPaint_DrawABox", function()
+        if not GetConVar("evx_draw_hud"):GetBool() then return end
+
+        local tr = util.GetPlayerTrace(LocalPlayer())
+        local trace = util.TraceLine(tr)
+        if (not trace.Hit) then return end
+        if (not trace.HitNonWorld) then return end
+
+        local text = "ERROR"
+        local font = "TargetID"
+        local evxType = ""
+
+        if trace.Entity:IsNPC() and trace.Entity:GetNWString("evxType", false) then
+            text = string.upper(trace.Entity:GetNWString("evxType"))
+            evxType = trace.Entity:GetNWString("evxType")
+        else
+            return
+        end
+
+        if evxType == "cloaked" then return end
+
+        surface.SetFont(font)
+        local w, h = surface.GetTextSize(text)
+
+        local MouseX, MouseY = gui.MousePos()
+
+        if (MouseX == 0 and MouseY == 0) then
+
+            MouseX = ScrW() / 2
+            MouseY = ScrH() / 2
+
+        end
+
+        local x = MouseX
+        local y = MouseY
+
+        x = x - w / 2
+        y = y + 30
+
+        -- The fonts internal drop shadow looks lousy with AA on
+        draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+        draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+        draw.SimpleText(text, font, x, y, evxConfig[evxType].color)
+
+        y = y + h + 5
+
+        local text = trace.Entity:GetClass()
+        local font = "TargetID"
+
+        surface.SetFont(font)
+        local w, h = surface.GetTextSize(text)
+        local x = MouseX - w / 2
+
+        draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+        draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+        draw.SimpleText(text, font, x, y, Color(255, 255, 255))
+
+        y = y + h + 5
+
+        local text = trace.Entity:Health()
+        local font = "TargetID"
+
+        surface.SetFont(font)
+        local w, h = surface.GetTextSize(text)
+        local x = MouseX - w / 2
+
+        draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+        draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+        draw.SimpleText(text, font, x, y, Color(255, 255, 255))
+    end)
+end
 
 if SERVER then
     CreateConVar("evx_enabled", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
@@ -155,194 +418,6 @@ if SERVER then
 
     local evxNPCs = {}
 
-    -- possible evx properties and hooks:
-    -- color - ev-x enemy color
-    -- spawn(ent) - ev-x enemy spawn function 
-    -- entitycreated(npc, ent) - react to ANY entity being made on the map (npc = ourselves)
-    -- takedamage(target, dmginfo) - ev-x enemy is taking damage
-    -- givedamage(target, dmginfo) - ev-x enemy is giving damage
-    -- killed(ent, attacker, inflictor) - ev-x enemy was killed
-    local evxConfig = {
-        explosion = {
-            color = Color(255, 0, 0, 255),
-            killed = function(ent, attacker, inflictor)
-                local explode = ents.Create("env_explosion")
-                explode:SetPos(ent:GetPos())
-                explode:SetOwner(ent)
-                explode:Spawn()
-                explode:SetKeyValue("iMagnitude", "80")
-                explode:Fire("Explode", 0, 0)
-            end
-        },
-        rogue = {
-            color = Color(0, 0, 255, 255),
-            entitycreated = function(npc, ent)
-                if not ent:IsNPC() or ent:GetClass() == npc:GetClass() then
-                    return
-                end
-                npc:AddEntityRelationship(ent, D_HT, 99)
-                ent:AddEntityRelationship(npc, D_HT, 99)
-            end,
-            spawn = function(ent)
-                local enemies = ents.FindByClass("npc_*")
-                for _, enemy in pairs(enemies) do
-                    if not enemy:IsNPC() or enemy:GetClass() == ent:GetClass() then
-                        return
-                    end
-                    enemy:AddEntityRelationship(ent, D_HT, 99)
-                    ent:AddEntityRelationship(enemy, D_HT, 99)
-                end
-            end
-        },
-        turret = {
-            color = Color(128, 128, 128, 255),
-            spawn = function(ent)
-                ent:CapabilitiesClear()
-                if IsValid(ent:GetPhysicsObject()) then
-                    ent:GetPhysicsObject():EnableMotion(false)
-                end
-            end
-        },
-        pyro = {
-            color = Color(255, 128, 0, 255),
-            givedamage = function(target, dmginfo)
-                if target:IsPlayer() or target:IsNPC() or
-                    IsValid(target:GetPhysicsObject()) then
-                    target:Ignite(1.5)
-                end
-            end
-        },
-        lifesteal = {
-            color = Color(0, 255, 130, 255),
-            givedamage = function(target, dmginfo)
-                local attacker = dmginfo:GetInflictor()
-
-                if target:IsPlayer() or target:IsNPC() then
-                    if IsValid(attacker) and attacker:IsNPC() then
-                        local lifestealDamage = dmginfo:GetDamage() * 2
-                        if attacker:Health() < attacker:GetMaxHealth() then
-                            attacker:SetHealth(
-                                math.min(attacker:Health() + lifestealDamage,
-                                         attacker:GetMaxHealth()))
-                            attacker:EmitSound(Sound("items/medshot4.wav"), 75,
-                                               80)
-
-                        end
-                        print(attacker:Health())
-                    end
-                end
-            end
-        },
-        boss = {
-            color = Color(80, 80, 100, 255),
-            spawn = function(ent)
-                ent:SetModelScale(1.5)
-                ent:SetHealth(ent:Health() * 8)
-            end,
-            givedamage = function(target, dmginfo)
-                dmginfo:ScaleDamage(2)
-                dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
-            end
-        },
-        bigboss = {
-            color = Color(0, 255, 255, 255),
-            spawn = function(ent)
-                ent:SetModelScale(2)
-                ent:SetHealth(ent:Health() * 16)
-            end,
-            givedamage = function(target, dmginfo)
-                dmginfo:ScaleDamage(4)
-                dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
-            end
-        },
-        mother = {
-            color = Color(255, 255, 0, 255),
-            spawn = function(ent) ent:SetModelScale(1.5) end,
-            killed = function(ent, attacker, inflictor)
-                local bmin, bmax = ent:GetModelBounds()
-                local scale = ent:GetModelScale()
-                local positions = {
-                    Vector(-bmax.x * scale, 0, bmax.z * scale),
-                    Vector(bmax.x * scale, 0, bmax.z * scale),
-                    Vector(0, -bmax.y * scale, bmax.z * scale),
-                    Vector(0, bmax.y * scale, bmax.z * scale)
-                }
-
-                for i, position in ipairs(positions) do
-                    local baby = ents.Create(ent:GetClass())
-                    baby:SetPos(ent:GetPos() + position)
-
-                    if IsValid(ent:GetActiveWeapon()) then
-                        baby:Give(ent:GetActiveWeapon():GetClass())
-                    end
-
-                    baby.evxType = "motherchild"
-                    baby:Spawn()
-                    baby:Activate()
-
-                    evxInit(baby)
-                end
-            end
-        },
-        motherchild = {
-            color = Color(255, 128, 0, 255),
-            spawn = function(ent)
-                ent:SetModelScale(0.5)
-                ent:SetHealth(ent:Health() / 3)
-            end,
-            givedamage = function(target, dmginfo)
-                dmginfo:ScaleDamage(0.5)
-                dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 0.5)
-            end
-        },
-        knockback = {
-            color = Color(255, 0, 255, 255),
-            givedamage = function(target, dmginfo)
-                if target:IsPlayer() or target:IsNPC() then
-                    target:SetVelocity(dmginfo:GetDamageForce() * 1.5)
-                else
-                    if IsValid(target:GetPhysicsObject()) then
-                        target:GetPhysicsObject():SetVelocity(
-                            dmginfo:GetDamageForce() * 1.5)
-                    end
-                end
-
-            end
-        },
-        puller = {
-            color = Color(0, 255, 0, 255),
-            givedamage = function(target, dmginfo)
-                if target:IsPlayer() or target:IsNPC() then
-                    target:SetVelocity(dmginfo:GetDamageForce() * -1)
-                    -- stun effect
-                    if target:IsPlayer() then
-                        target:Freeze(true)
-                        timer.Simple(.3, function()
-                            target:Freeze(false)
-                        end)
-                    end
-                else
-                    if IsValid(target:GetPhysicsObject()) then
-                        target:GetPhysicsObject():SetVelocity(
-                            dmginfo:GetDamageForce() * -1)
-                    end
-                end
-
-            end
-        },
-        cloaked = {
-            color = Color(255, 255, 255, 255),
-            spawn = function(ent)
-                ent:SetMaterial("evx/cloaked")
-                ent:SetHealth(ent:Health() / 2)
-            end,
-            givedamage = function(target, dmginfo)
-                dmginfo:ScaleDamage(1.5)
-                dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
-            end
-        }
-    }
-
     function evxInit(ent)
         -- reset these before a modifier changes it
         ent:SetModelScale(1)
@@ -350,17 +425,17 @@ if SERVER then
         ent:SetMaterial("")
 
         if IsUsingColors() then
-            ent:SetColor(evxConfig[ent.evxType].color)
+            ent:SetColor(evxConfig[ent:GetNWString("evxType")].color)
         end
-        safeCall(evxConfig[ent.evxType].spawn, ent)
+        safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
 
-        if ent.evxType2 then
+        if ent:GetNWString("evxType2", false) then
             if IsUsingColors() then
                 ent:SetMaterial("models/shiny")
                 ent:SetColor(Color(255, 255, 255, 0))
             end
 
-            safeCall(evxConfig[ent.evxType2].spawn, ent)
+            safeCall(evxConfig[ent:GetNWString("evxType2")].spawn, ent)
         end
 
         evxNPCs[ent] = true
@@ -370,12 +445,13 @@ if SERVER then
         if not IsEvxEnabled() then return end
 
         -- we're a ev-x enemy getting killed
-        if IsValid(ent) and ent.evxType then
-            safeCall(evxConfig[ent.evxType].killed, ent, attacker, inflictor)
+        if IsValid(ent) and ent:GetNWString("evxType", false) then
+            safeCall(evxConfig[ent:GetNWString("evxType")].killed, ent,
+                     attacker, inflictor)
 
-            if ent.evxType2 then
-                safeCall(evxConfig[ent.evxType2].killed, ent, attacker,
-                         inflictor)
+            if ent:GetNWString("evxType2", false) then
+                safeCall(evxConfig[ent:GetNWString("evxType2")].killed, ent,
+                         attacker, inflictor)
             end
 
             evxNPCs[ent] = nil
@@ -383,7 +459,9 @@ if SERVER then
     end)
 
     hook.Add("EntityRemoved", "EVXEntityRemoved", function(ent)
-        if IsValid(ent) and ent.evxType then evxNPCs[ent] = nil end
+        if IsValid(ent) and ent:GetNWString("evxType", false) then
+            evxNPCs[ent] = nil
+        end
     end)
 
     hook.Add("EntityTakeDamage", "EVXEntityTakeDamage",
@@ -391,23 +469,27 @@ if SERVER then
         if not IsEvxEnabled() then return end
 
         -- we're a ev-x enemy taking damage
-        if IsValid(target) and target.evxType then
-            safeCall(evxConfig[target.evxType].takedamage, target, dmginfo)
+        if IsValid(target) and target:GetNWString("evxType", false) then
+            safeCall(evxConfig[target:GetNWString("evxType")].takedamage,
+                     target, dmginfo)
 
-            if target.evxType2 then
-                safeCall(evxConfig[target.evxType2].takedamage, target, dmginfo)
+            if target:GetNWString("evxType2", false) then
+                safeCall(evxConfig[target:GetNWString("evxType2")].takedamage,
+                         target, dmginfo)
             end
         end
 
         -- we're an entity taking damage from an ev-x enemy
         if IsValid(target) and IsEntity(target) and
-            IsValid(dmginfo:GetAttacker()) and dmginfo:GetAttacker().evxType then
-            safeCall(evxConfig[dmginfo:GetAttacker().evxType].givedamage,
-                     target, dmginfo)
+            IsValid(dmginfo:GetAttacker()) and
+            dmginfo:GetAttacker():GetNWString("evxType", false) then
+            safeCall(evxConfig[dmginfo:GetAttacker():GetNWString("evxType")]
+                         .givedamage, target, dmginfo)
 
-            if dmginfo:GetAttacker().evxType2 then
-                safeCall(evxConfig[dmginfo:GetAttacker().evxType2].givedamage,
-                         target, dmginfo)
+            if dmginfo:GetAttacker():GetNWString("evxType2", false) then
+                safeCall(
+                    evxConfig[dmginfo:GetAttacker():GetNWString("evxType2")]
+                        .givedamage, target, dmginfo)
             end
         end
     end)
@@ -425,8 +507,10 @@ if SERVER then
         if not IsEvxEnabled() then return end
 
         for evxNPC, _ in pairs(evxNPCs) do
-            if IsValid(evxNPC) and evxNPC:IsNPC() and evxNPC.evxType then
-                safeCall(evxConfig[evxNPC.evxType].entitycreated, evxNPC, ent)
+            if IsValid(evxNPC) and evxNPC:IsNPC() and
+                evxNPC:GetNWString("evxType", false) then
+                safeCall(evxConfig[evxNPC:GetNWString("evxType")].entitycreated,
+                         evxNPC, ent)
             end
         end
 
@@ -443,15 +527,15 @@ if SERVER then
                 if randomWeight <= 0 then
                     if k == "nothing" then break end
                     if k == "mix2" then
-                        ent.evxType = GetRandomType(evxChancesType2,
-                                                    weightSumType2)
-                        ent.evxType2 = GetRandomType(evxChancesType2,
-                                                     weightSumType2)
+                        ent:SetNWString("evxType", GetRandomType(
+                                            evxChancesType2, weightSumType2))
+                        ent:SetNWString("evxType2", GetRandomType(
+                                            evxChancesType2, weightSumType2))
                         table.insert(evxPendingInit, ent)
                         break
                     end
 
-                    ent.evxType = k
+                    ent:SetNWString("evxType", k)
                     table.insert(evxPendingInit, ent)
                     break
                 end
