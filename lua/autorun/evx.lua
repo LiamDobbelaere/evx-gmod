@@ -393,6 +393,10 @@ if SERVER then
     CreateConVar("evx_use_colors", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Use colors on the NPC to indicate the type of variant they are",
                  0, 1)
+    CreateConVar("evx_randomize_on_rate_change", "1",
+                 {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Re-randomize the NPC variations when the spawnrates change",
+                 0, 1)
     CreateConVar("evx_rate_nothing", "50", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the 'no' ev-x modifier in enemies", 0, 100000)
     CreateConVar("evx_rate_knockback", "40", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
@@ -429,14 +433,11 @@ if SERVER then
     CreateConVar("evx_rate_gnome", "2", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the gnome ev-x modifier in enemies", 0,
                  100000)
-    concommand.Add("evx_rate_reset_all", function()
-        GetConVar("evx_rate_nothing"):Revert()
-        for _, v in pairs(evxTypes) do
-            GetConVar("evx_rate_" .. v):Revert()
-        end
-    end)
 
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
+    local function IsRandomizingOnRateChange()
+        return GetConVar("evx_randomize_on_rate_change"):GetBool()
+    end
     local function IsAffectingAllies()
         return GetConVar("evx_affect_allies"):GetBool()
     end
@@ -447,6 +448,8 @@ if SERVER then
         return GetConVar("evx_rate_" .. type):GetInt()
     end
 
+    local evxNPCs = {}
+    local evxTickNPCs = {}
     local allies = {
         ["npc_alyx"] = 1,
         ["npc_magnusson"] = 1,
@@ -469,6 +472,103 @@ if SERVER then
         ["monster_scientist"] = 1
     }
 
+    local evxChances = {}
+    local weightSum = 0
+
+    local function evxApply(ent)
+        if not IsEvxEnabled() then return end
+
+        if IsValid(ent) and ent:IsNPC() then
+            -- if they're an ally and the player doesn't want allies affected, bail out
+            if not IsAffectingAllies() and allies[ent:GetClass()] then
+                return
+            end
+
+            -- Weighted random selection
+            local randomWeight = math.random(weightSum)
+            for k, v in pairs(evxChances) do
+                randomWeight = randomWeight - v
+                if randomWeight <= 0 then
+                    if k == "nothing" then break end
+                    if k == "mix2" then
+                        ent:SetNWString("evxType", GetRandomType(
+                                            evxChancesType2, weightSumType2))
+                        ent:SetNWString("evxType2", GetRandomType(
+                                            evxChancesType2, weightSumType2))
+                        table.insert(evxPendingInit, ent)
+                        break
+                    end
+
+                    ent:SetNWString("evxType", k)
+                    table.insert(evxPendingInit, ent)
+                    break
+                end
+            end
+        end
+
+        for evxNPC, _ in pairs(evxNPCs) do
+            if IsValid(evxNPC) and evxNPC:IsNPC() and
+                evxNPC:GetNWString("evxType", false) then
+                safeCall(evxConfig[evxNPC:GetNWString("evxType")].entitycreated,
+                         evxNPC, ent)
+            end
+        end
+    end
+
+    local function recalculateWeights()
+        evxChances = {
+            ["nothing"] = GetSpawnRateFor("nothing"),
+            ["lifesteal"] = GetSpawnRateFor("lifesteal"),
+            ["metal"] = GetSpawnRateFor("metal"),
+            ["gnome"] = GetSpawnRateFor("gnome"),
+            ["knockback"] = GetSpawnRateFor("knockback"),
+            ["puller"] = GetSpawnRateFor("puller"),
+            ["pyro"] = GetSpawnRateFor("pyro"),
+            ["explosion"] = GetSpawnRateFor("explosion"),
+            ["cloaked"] = GetSpawnRateFor("cloaked"),
+            ["mother"] = GetSpawnRateFor("mother"),
+            ["boss"] = GetSpawnRateFor("boss"),
+            ["rogue"] = GetSpawnRateFor("rogue"),
+            ["bigboss"] = GetSpawnRateFor("bigboss")
+            -- ["turret"] = 10000,
+            -- ["mix2"] = 1000
+        }
+
+        weightSum = 0
+        for k, v in pairs(evxChances) do weightSum = weightSum + v end
+
+        if IsRandomizingOnRateChange() then
+            for evxNPC, _ in pairs(evxNPCs) do
+                if IsValid(evxNPC) and evxNPC:IsNPC() then
+                    evxApply(evxNPC)
+                end
+            end
+        end
+    end
+
+    recalculateWeights()
+
+    cvars.AddChangeCallback("evx_rate_nothing", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_knockback", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_puller", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_pyro", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_lifesteal", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_explosion", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_cloaked", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_mother", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_boss", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_rogue", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_bigboss", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_metal", recalculateWeights)
+    cvars.AddChangeCallback("evx_rate_gnome", recalculateWeights)
+
+    concommand.Add("evx_rate_reset_all", function()
+        GetConVar("evx_rate_nothing"):Revert()
+        for _, v in pairs(evxTypes) do
+            GetConVar("evx_rate_" .. v):Revert()
+        end
+    end)
+
     -- TODO NPC variation exclusions:
     -- copy chances table
     -- remove bad variations for this npc
@@ -480,26 +580,6 @@ if SERVER then
     -- that spawns a headcrab
     -- the headcrab infects others
 
-    local evxChances = {
-        ["nothing"] = GetSpawnRateFor("nothing"),
-        ["lifesteal"] = GetSpawnRateFor("lifesteal"),
-        ["metal"] = GetSpawnRateFor("metal"),
-        ["gnome"] = GetSpawnRateFor("gnome"),
-        ["knockback"] = GetSpawnRateFor("knockback"),
-        ["puller"] = GetSpawnRateFor("puller"),
-        ["pyro"] = GetSpawnRateFor("pyro"),
-        ["explosion"] = GetSpawnRateFor("explosion"),
-        ["cloaked"] = GetSpawnRateFor("cloaked"),
-        ["mother"] = GetSpawnRateFor("mother"),
-        ["boss"] = GetSpawnRateFor("boss"),
-        ["rogue"] = GetSpawnRateFor("rogue"),
-        ["bigboss"] = GetSpawnRateFor("bigboss")
-        -- ["turret"] = 10000,
-        -- ["mix2"] = 1000
-    }
-    local weightSum = 0
-    for k, v in pairs(evxChances) do weightSum = weightSum + v end
-
     local evxChancesType2 = {
         ["explosion"] = 50,
         ["knockback"] = 20,
@@ -509,9 +589,6 @@ if SERVER then
     }
     local weightSumType2 = 0
     for k, v in pairs(evxChancesType2) do weightSumType2 = weightSumType2 + v end
-
-    local evxNPCs = {}
-    local evxTickNPCs = {}
 
     function evxInit(ent)
         -- reset these before a modifier changes it
@@ -604,61 +681,7 @@ if SERVER then
         end
     end
 
-    hook.Add("OnEntityCreated", "EVXSpawnedNPC", function(ent)
-        if not IsEvxEnabled() then return end
-
-        -- if ent:GetClass() == "prop_physics" then
-        -- spider baby
-        --    local baby = ents.Create("npc_headcrab_fast")
-        --    timer.Simple(1, function()
-        --        if IsValid(baby) and IsValid(ent) then
-        --            baby:SetPos(ent:GetPos())
-        --        end
-        --    end)
-
-        --    baby:SetNWString("evxType", "spiderbaby")
-        --    baby:Spawn()
-        --    baby:Activate()
-
-        --    table.insert(evxPendingInit, baby)
-        -- end
-
-        for evxNPC, _ in pairs(evxNPCs) do
-            if IsValid(evxNPC) and evxNPC:IsNPC() and
-                evxNPC:GetNWString("evxType", false) then
-                safeCall(evxConfig[evxNPC:GetNWString("evxType")].entitycreated,
-                         evxNPC, ent)
-            end
-        end
-
-        if IsValid(ent) and ent:IsNPC() then
-            -- if they're an ally and the player doesn't want allies affected, bail out
-            if not IsAffectingAllies() and allies[ent:GetClass()] then
-                return
-            end
-
-            -- Weighted random selection
-            local randomWeight = math.random(weightSum)
-            for k, v in pairs(evxChances) do
-                randomWeight = randomWeight - v
-                if randomWeight <= 0 then
-                    if k == "nothing" then break end
-                    if k == "mix2" then
-                        ent:SetNWString("evxType", GetRandomType(
-                                            evxChancesType2, weightSumType2))
-                        ent:SetNWString("evxType2", GetRandomType(
-                                            evxChancesType2, weightSumType2))
-                        table.insert(evxPendingInit, ent)
-                        break
-                    end
-
-                    ent:SetNWString("evxType", k)
-                    table.insert(evxPendingInit, ent)
-                    break
-                end
-            end
-        end
-    end)
+    hook.Add("OnEntityCreated", "EVXSpawnedNPC", evxApply)
 
     hook.Add("Tick", "EVXTick", function()
         if not IsEvxEnabled() then return end
