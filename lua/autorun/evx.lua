@@ -687,13 +687,14 @@ if SERVER then
         if not IsEvxEnabled() then return end
 
         for evxPendingIndex = 1, #evxPendingInit do
-            if IsValid(evxPendingInit[evxPendingIndex]) then
-                evxInit(evxPendingInit[evxPendingIndex])
+            local evxNPC = evxPendingInit[evxPendingIndex]
+            if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) then
+                evxInit(evxNPC)
             end
         end
 
         for evxNPC, _ in pairs(evxTickNPCs) do
-            if IsValid(evxNPC) then
+            if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) then
                 safeCall(evxConfig[evxNPC:GetNWString("evxType")].tick, evxNPC)
             end
         end
