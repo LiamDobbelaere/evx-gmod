@@ -683,7 +683,7 @@ if SERVER then
 
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", evxApply)
 
-    hook.Add("Tick", "EVXTick", function()
+    hook.Add("Think", "EVXThink", function()
         if not IsEvxEnabled() then return end
 
         for evxPendingIndex = 1, #evxPendingInit do
