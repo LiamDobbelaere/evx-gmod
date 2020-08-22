@@ -27,21 +27,12 @@ function ENT:SpawnFunction(ply, tr, ClassName)
 end
 
 function ENT:Initialize()
-    if (CLIENT) then return end
+    if CLIENT then return end
 
-    self:SetModel("models/props_junk/PopCan01a.mdl")
-    self:PhysicsInit(SOLID_VPHYSICS)
-    self:SetMoveType(MOVETYPE_VPHYSICS)
-    self:SetSolid(SOLID_VPHYSICS)
-    self:SetMaterial("models/debug/debugwhite")
-    self:SetColor(Color(255, 255, 0, 255))
-
-    local phys = self:GetPhysicsObject()
-    if (phys:IsValid()) then
-        phys:Wake()
-        phys:EnableGravity(false)
-        phys:EnableMotion(false)
-    end
+    self:SetRenderMode(RENDERMODE_NONE)
+    self:SetMoveType(MOVETYPE_NONE)
+    self:SetSolid(SOLID_NONE)
+    self.life = 15
 
     ParticleEffect("evx_gas_infinite", self:GetPos(), Angle(0, 0, 0), self)
 end
@@ -56,8 +47,15 @@ function ENT:Think()
     dmg:SetDamageType(DMG_POISON)
 
     for _, ent in pairs(nearbyEnts) do
-        if ent:IsPlayer() or ent:IsNPC() then ent:TakeDamageInfo(dmg) end
+        if IsValid(ent) then
+            if ent:IsPlayer() or ent:IsNPC() then
+                ent:TakeDamageInfo(dmg)
+            end
+        end
     end
+
+    self.life = self.life - 1
+    if self.life <= 0 then self:Remove() end
 
     -- Think once per second
     self:NextThink(CurTime() + 1)

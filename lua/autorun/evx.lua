@@ -5,7 +5,7 @@ local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "rogue", "pyro", "lifesteal", "metal", "gnome"
+    "rogue", "pyro", "lifesteal", "metal", "gnome", "gas"
 }
 local evxPendingInit = {}
 -- possible evx properties and hooks:
@@ -26,6 +26,15 @@ local evxConfig = {
             explode:Spawn()
             explode:SetKeyValue("iMagnitude", "80")
             explode:Fire("Explode", 0, 0)
+        end
+    },
+    gas = {
+        color = Color(80, 255, 0, 255),
+        killed = function(ent, attacker, inflictor)
+            local gasCloud = ents.Create("sent_evx_gascloud")
+            gasCloud:SetPos(ent:GetPos())
+            gasCloud:SetOwner(ent)
+            gasCloud:Spawn()
         end
     },
     spidersack = {
@@ -307,6 +316,44 @@ properties.Add("variants", {
     end
 })
 
+properties.Add("variantslevel", {
+    MenuLabel = "Variant level",
+    Order = 601,
+    MenuIcon = "icon16/bug_edit.png",
+    Filter = function(self, ent, ply)
+        if (not IsValid(ent)) then return false end
+        if (not ent:IsNPC()) then return false end
+        if (not gamemode.Call("CanProperty", ply, "variants", ent)) then
+            return false
+        end
+
+        return true
+    end,
+    MenuOpen = function(self, option, ent, tr)
+        local submenu = option:AddSubMenu()
+
+        for _, v in pairs({5, 10, 20, 50, 70, 100}) do
+            submenu:AddOption('Lv. ' .. v,
+                              function() self:SetVariantLevel(ent, v) end)
+        end
+    end,
+    Action = function(self, ent) end,
+    SetVariantLevel = function(self, ent, level)
+        self:MsgStart()
+        net.WriteEntity(ent)
+        net.WriteInt(level, 8)
+        self:MsgEnd()
+    end,
+    Receive = function(self, length, player)
+        local ent = net.ReadEntity()
+        local level = net.ReadInt(8)
+
+        if (not self:Filter(ent, player)) then return end
+
+        ent:SetNWInt("evxLevel", level)
+    end
+})
+
 if CLIENT then
     CreateClientConVar("evx_draw_hud", "1", true, false,
                        "Disable drawing the ev-x hud, like displaying NPC health and type",
@@ -358,8 +405,17 @@ if CLIENT then
 
         y = y + h + 5
 
-        local text = trace.Entity:GetClass()
+        local level = trace.Entity:GetNWInt("evxLevel", -1)
+        local text = 'Lv. ' .. level
         local font = "TargetID"
+        local levelColor = Color(180, 180, 180)
+        if level >= 70 then
+            levelColor = Color(255, 0, 0)
+        elseif level >= 50 then
+            levelColor = Color(255, 255, 0)
+        elseif level >= 20 then
+            levelColor = Color(0, 128, 255)
+        end
 
         surface.SetFont(font)
         local w, h = surface.GetTextSize(text)
@@ -367,7 +423,7 @@ if CLIENT then
 
         draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
         draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
-        draw.SimpleText(text, font, x, y, Color(255, 255, 255))
+        draw.SimpleText(text, font, x, y, levelColor)
 
         y = y + h + 5
 
@@ -500,6 +556,8 @@ if SERVER then
                     end
 
                     ent:SetNWString("evxType", k)
+                    -- TODO: random level with weights !!
+                    ent:SetNWInt("evxLevel", math.random(1, 100))
                     table.insert(evxPendingInit, ent)
                     break
                 end
@@ -517,6 +575,7 @@ if SERVER then
 
     local function recalculateWeights()
         evxChances = {
+            ["gas"] = 10000,
             ["nothing"] = GetSpawnRateFor("nothing"),
             ["lifesteal"] = GetSpawnRateFor("lifesteal"),
             ["metal"] = GetSpawnRateFor("metal"),
