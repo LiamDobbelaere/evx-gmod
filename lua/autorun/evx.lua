@@ -649,6 +649,8 @@ if SERVER then
     CreateConVar("evx_rate_possessed", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the possessed ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_level_force", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Force a level for all ev-x enemies, 0 to disable", 0, 100)
     CreateConVar("evx_random_spiders_chance", "0.25",
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The odds of getting random spider babies around physics props, 1 means 100% of the time",
@@ -669,6 +671,9 @@ if SERVER then
     end
     local function GetRandomSpidersChance()
         return GetConVar("evx_random_spiders_chance"):GetFloat()
+    end
+    local function GetForcedLevel()
+        return GetConVar("evx_level_force"):GetInt()
     end
 
     local evxNPCs = {}
@@ -743,7 +748,13 @@ if SERVER then
                     end
 
                     ent:SetNWString("evxType", k)
-                    ent:SetNWInt("evxLevel", randomEnemyLevel())
+
+                    if GetForcedLevel() > 0 then
+                        ent:SetNWInt("evxLevel", GetForcedLevel())
+                    else
+                        ent:SetNWInt("evxLevel", randomEnemyLevel())
+                    end
+
                     table.insert(evxPendingInit, ent)
                     break
                 end
