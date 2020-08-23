@@ -27,6 +27,7 @@ local evxTypes = {
     "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack",
     "possessed"
 }
+table.sort(evxTypes)
 local evxPendingInit = {}
 -- possible evx properties and hooks:
 -- color - ev-x NPC color
@@ -505,6 +506,41 @@ if CLIENT then
                        "Disable drawing the ev-x hud, like displaying NPC health and type",
                        0, 1)
 
+    hook.Add("AddToolMenuCategories", "EVXCategory", function()
+        spawnmenu.AddToolCategory("Utilities", "EV-X", "EV-X")
+    end)
+
+    hook.Add("PopulateToolMenu", "EVXSettings", function()
+        spawnmenu.AddToolMenuOption("Utilities", "EV-X", "Spawnrates",
+                                    "Spawnrates", "", "", function(panel)
+            panel:ClearControls()
+
+            panel:NumSlider("Nothing", "evx_rate_nothing", 0, 200)
+            for _, v in pairs(evxTypes) do
+                panel:NumSlider(v:gsub("^%l", string.upper), "evx_rate_" .. v,
+                                0, 200)
+            end
+
+            panel:NumSlider("Random spiders chance",
+                            "evx_random_spiders_chance", 0, 1)
+
+            panel:Button("RESET all spawn rates", "evx_rate_reset_all")
+        end)
+
+        spawnmenu.AddToolMenuOption("Utilities", "EV-X", "General", "General",
+                                    "", "", function(panel)
+            panel:ClearControls()
+            panel:CheckBox("Enabled", "evx_enabled")
+            panel:CheckBox("Affect allies", "evx_affect_allies")
+            panel:CheckBox("Use colors", "evx_use_colors")
+            panel:CheckBox("Use color intensity for levels",
+                           "evx_level_use_color_intensity")
+            panel:CheckBox("Randomize on rate change",
+                           "evx_randomize_on_rate_change")
+            panel:NumSlider("Force level", "evx_level_force", 0, 100)
+        end)
+    end)
+
     hook.Add("HUDPaint", "HUDPaint_DrawABox", function()
         if not GetConVar("evx_draw_hud"):GetBool() then return end
 
@@ -651,6 +687,9 @@ if SERVER then
                  100000)
     CreateConVar("evx_level_force", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Force a level for all ev-x enemies, 0 to disable", 0, 100)
+    CreateConVar("evx_level_use_color_intensity", "1",
+                 {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Use color intensity to display an ev-x enemy's level", 0, 1)
     CreateConVar("evx_random_spiders_chance", "0.25",
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The odds of getting random spider babies around physics props, 1 means 100% of the time",
@@ -665,6 +704,9 @@ if SERVER then
     end
     local function IsUsingColors()
         return GetConVar("evx_use_colors"):GetBool()
+    end
+    local function IsUsingLevelColors()
+        return GetConVar("evx_level_use_color_intensity"):GetBool()
     end
     local function GetSpawnRateFor(type)
         return GetConVar("evx_rate_" .. type):GetInt()
@@ -825,6 +867,8 @@ if SERVER then
         for _, v in pairs(evxTypes) do
             GetConVar("evx_rate_" .. v):Revert()
         end
+        GetConVar("evx_random_spiders_chance"):Revert()
+        GetConVar("evx_level_force"):Revert()
     end)
 
     -- TODO NPC variation exclusions:
@@ -853,14 +897,15 @@ if SERVER then
         ent:SetModelScale(1)
         ent:SetHealth(ent:GetMaxHealth())
         ent:SetMaterial("")
+        ent:SetRenderFX(kRenderFxNone)
+        ent:SetRenderMode(RENDERMODE_NORMAL)
 
         if IsUsingColors() then
             local variationStrength = math.max(0.4,
                                                ent:GetNWInt("evxLevel", 1) / 100)
 
-            if ent:GetNWString("evxType") == 'spiderbaby' then
-                variationStrength = 1
-            end
+            if ent:GetNWString("evxType") == 'spiderbaby' or
+                (not IsUsingLevelColors()) then variationStrength = 1 end
 
             local col = evxConfig[ent:GetNWString("evxType")].color
             local def = Color(255, 255, 255, 255)
