@@ -25,7 +25,7 @@ end
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
     "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack",
-    "possessed"
+    "possessed", "mix2"
 }
 table.sort(evxTypes)
 local evxPendingInit = {}
@@ -110,6 +110,7 @@ local evxConfig = {
 
                     baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
                     baby:SetNWString("evxType", "spiderbaby")
+                    baby:SetNWString("evxType2", nil)
                     baby:Spawn()
                     baby:Activate()
 
@@ -283,7 +284,6 @@ local evxConfig = {
                         attacker:EmitSound(Sound("items/medshot4.wav"), 75, 80)
 
                     end
-                    print(attacker:Health())
                 end
             end
         end
@@ -339,6 +339,7 @@ local evxConfig = {
 
                 baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
                 baby:SetNWString("evxType", "motherchild")
+                baby:SetNWString("evxType2", nil)
                 baby:Spawn()
                 baby:Activate()
 
@@ -436,8 +437,12 @@ properties.Add("variants", {
         local submenu = option:AddSubMenu()
 
         for k, v in pairs(evxTypes) do
-            submenu:AddOption(v:gsub("^%l", string.upper),
-                              function() self:SetVariant(ent, v) end)
+            if v ~= 'mix2' then
+                submenu:AddOption(v:gsub("^%l", string.upper),
+                                  function()
+                    self:SetVariant(ent, v)
+                end)
+            end
         end
     end,
     Action = function(self, ent) end,
@@ -462,9 +467,53 @@ properties.Add("variants", {
     end
 })
 
+properties.Add("variants2", {
+    MenuLabel = "Variants (type 2)",
+    Order = 601,
+    MenuIcon = "icon16/bug.png",
+    Filter = function(self, ent, ply)
+        if (not IsValid(ent)) then return false end
+        if (not ent:IsNPC()) then return false end
+        if (ent:GetNWString("evxType", false) == false) then return false end
+        if (not gamemode.Call("CanProperty", ply, "variants", ent)) then
+            return false
+        end
+
+        return true
+    end,
+    MenuOpen = function(self, option, ent, tr)
+        local submenu = option:AddSubMenu()
+
+        for k, v in pairs(evxTypes) do
+            if v ~= 'mix2' then
+                submenu:AddOption(v:gsub("^%l", string.upper),
+                                  function()
+                    self:SetVariant(ent, v)
+                end)
+            end
+        end
+    end,
+    Action = function(self, ent) end,
+    SetVariant = function(self, ent, variant)
+        self:MsgStart()
+        net.WriteEntity(ent)
+        net.WriteString(variant)
+        self:MsgEnd()
+    end,
+    Receive = function(self, length, player)
+        local ent = net.ReadEntity()
+        local variant = net.ReadString()
+
+        if (not self:Filter(ent, player)) then return end
+
+        ent:SetNWString("evxType2", variant)
+        table.insert(evxPendingInit, ent)
+    end
+})
+
 properties.Add("variantslevel", {
     MenuLabel = "Variant level",
-    Order = 601,
+    Order = 602,
     MenuIcon = "icon16/bug_edit.png",
     Filter = function(self, ent, ply)
         if (not IsValid(ent)) then return false end
@@ -552,6 +601,7 @@ if CLIENT then
         local text = "ERROR"
         local font = "TargetID"
         local evxType = ""
+        local evxType2 = ""
 
         if trace.Entity:GetNWString("evxType", false) then
             text = string.upper(trace.Entity:GetNWString("evxType"))
@@ -584,6 +634,21 @@ if CLIENT then
         draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
         draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
         draw.SimpleText(text, font, x, y, evxConfig[evxType].color)
+
+        if trace.Entity:GetNWString("evxType2", false) then
+            text = string.upper(trace.Entity:GetNWString("evxType2"))
+            evxType2 = trace.Entity:GetNWString("evxType2")
+
+            y = y + h + 5
+
+            surface.SetFont(font)
+            local w, h = surface.GetTextSize(text)
+            local x = MouseX - w / 2
+
+            draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+            draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+            draw.SimpleText(text, font, x, y, evxConfig[evxType2].color)
+        end
 
         y = y + h + 5
 
@@ -671,6 +736,8 @@ if SERVER then
     CreateConVar("evx_rate_bigboss", "5", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the bigboss ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_rate_mix2", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the mix2 ev-x modifier in enemies", 0, 100000)
     CreateConVar("evx_rate_metal", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the metal ev-x modifier in enemies", 0,
                  100000)
@@ -720,6 +787,7 @@ if SERVER then
 
     local evxNPCs = {}
     local evxTickNPCs = {}
+    local evxMixNPCs = {}
     local allies = {
         ["npc_alyx"] = 1,
         ["npc_magnusson"] = 1,
@@ -743,10 +811,22 @@ if SERVER then
     }
 
     local evxChances = {}
+    local evxChancesMix = {}
     local weightSum = 0
+    local weightSumMix = 0
+
+    local function GetRandomType(chances, weightSum)
+        local randomWeight = math.random(weightSum)
+
+        for k, v in pairs(chances) do
+            randomWeight = randomWeight - v
+            if randomWeight <= 0 then return k end
+        end
+    end
 
     local function evxApply(ent)
         if not IsEvxEnabled() then return end
+        if ent.evxIgnore then return end
 
         if ent:GetClass() == "prop_physics" and math.random() <
             GetRandomSpidersChance() then
@@ -762,6 +842,7 @@ if SERVER then
 
             baby.evxPermanent = true
             baby:SetNWString("evxType", "spiderbaby")
+            baby:SetNWString("evxType2", nil)
             baby:Spawn()
             baby:Activate()
 
@@ -781,10 +862,14 @@ if SERVER then
                 if randomWeight <= 0 then
                     if k == "nothing" then break end
                     if k == "mix2" then
-                        ent:SetNWString("evxType", GetRandomType(
-                                            evxChancesType2, weightSumType2))
-                        ent:SetNWString("evxType2", GetRandomType(
-                                            evxChancesType2, weightSumType2))
+                        local firstType =
+                            GetRandomType(evxChancesMix, weightSumMix)
+                        ent:SetNWString("evxType", firstType)
+                        local secondTypes = table.Copy(evxChancesMix)
+                        secondTypes[firstType] = nil
+                        ent:SetNWString("evxType2", GetRandomType(secondTypes,
+                                                                  weightSumMix))
+                        ent:SetNWInt("evxLevel", randomEnemyLevel())
                         table.insert(evxPendingInit, ent)
                         break
                     end
@@ -829,17 +914,32 @@ if SERVER then
             ["mother"] = GetSpawnRateFor("mother"),
             ["boss"] = GetSpawnRateFor("boss"),
             ["rogue"] = GetSpawnRateFor("rogue"),
-            ["bigboss"] = GetSpawnRateFor("bigboss")
+            ["bigboss"] = GetSpawnRateFor("bigboss"),
             -- ["turret"] = 10000,
-            -- ["mix2"] = 1000
+            ["mix2"] = GetSpawnRateFor("mix2")
         }
+
+        evxChancesMix = table.Copy(evxChances)
+        evxChancesMix["mix2"] = nil
+        evxChancesMix["nothing"] = nil
 
         weightSum = 0
         for k, v in pairs(evxChances) do weightSum = weightSum + v end
 
+        weightSumMix = 0
+        for k, v in pairs(evxChancesMix) do
+            weightSumMix = weightSumMix + v
+        end
+
         if IsRandomizingOnRateChange() then
             for evxNPC, _ in pairs(evxNPCs) do
                 if IsValid(evxNPC) and evxNPC:IsNPC() then
+                    evxNPC:SetNWString("evxType", nil)
+                    evxNPC:SetNWString("evxType2", nil)
+
+                    evxMixNPCs[evxNPC] = nil
+                    evxTickNPCs[evxNPC] = nil
+
                     evxApply(evxNPC)
                 end
             end
@@ -918,19 +1018,22 @@ if SERVER then
         safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
 
         if ent:GetNWString("evxType2", false) then
-            if IsUsingColors() then
-                ent:SetMaterial("models/shiny")
-                ent:SetColor(Color(255, 255, 255, 0))
+            ent:SetMaterial("models/shiny")
+
+            if evxConfig[ent:GetNWString("evxType2")].tick ~= nil then
+                evxTickNPCs[ent] = true
             end
+
+            evxMixNPCs[ent] = true
 
             safeCall(evxConfig[ent:GetNWString("evxType2")].spawn, ent)
         end
 
-        evxNPCs[ent] = true
-
         if evxConfig[ent:GetNWString("evxType")].tick ~= nil then
             evxTickNPCs[ent] = true
         end
+
+        evxNPCs[ent] = true
     end
 
     hook.Add("OnNPCKilled", "EVXOnNPCKilled", function(ent, attacker, inflictor)
@@ -948,6 +1051,7 @@ if SERVER then
 
             evxNPCs[ent] = nil
             evxTickNPCs[ent] = nil
+            evxMixNPCs[ent] = nil
         end
     end)
 
@@ -955,6 +1059,7 @@ if SERVER then
         if IsValid(ent) and ent:GetNWString("evxType", false) then
             evxNPCs[ent] = nil
             evxTickNPCs[ent] = nil
+            evxMixNPCs[ent] = nil
         end
     end)
 
@@ -988,15 +1093,6 @@ if SERVER then
         end
     end)
 
-    local function GetRandomType(chances, weightSum)
-        local randomWeight = math.random(weightSum)
-
-        for k, v in pairs(chances) do
-            randomWeight = randomWeight - v
-            if randomWeight <= 0 then return k end
-        end
-    end
-
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", evxApply)
 
     hook.Add("Think", "EVXThink", function()
@@ -1012,6 +1108,42 @@ if SERVER then
         for evxNPC, _ in pairs(evxTickNPCs) do
             if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) then
                 safeCall(evxConfig[evxNPC:GetNWString("evxType")].tick, evxNPC)
+            end
+
+            if IsValid(evxNPC) and evxNPC:GetNWString("evxType2", false) then
+                safeCall(evxConfig[evxNPC:GetNWString("evxType2")].tick, evxNPC)
+            end
+        end
+
+        if IsUsingColors() then
+            for evxNPC, _ in pairs(evxMixNPCs) do
+                if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) and
+                    evxNPC:GetNWString("evxType2", false) then
+                    if evxNPC.evxMix2Flash == nil then
+                        evxNPC.evxMix2Flash = false
+                        evxNPC.evxMix2Last = CurTime()
+                    end
+
+                    local col = Color(255, 255, 255, 255)
+
+                    if evxNPC.evxMix2Flash then
+                        col = evxConfig[evxNPC:GetNWString("evxType")].color
+                    else
+                        col = evxConfig[evxNPC:GetNWString("evxType2")].color
+                    end
+
+                    local curr = evxNPC:GetColor()
+                    evxNPC:SetColor(Color(Lerp(0.3, curr.r, col.r),
+                                          Lerp(0.3, curr.g, col.g),
+                                          Lerp(0.3, curr.b, col.b), 255))
+
+                    -- evxNPC:SetColor(col)
+
+                    if CurTime() - evxNPC.evxMix2Last > 0.25 then
+                        evxNPC.evxMix2Flash = not evxNPC.evxMix2Flash
+                        evxNPC.evxMix2Last = CurTime()
+                    end
+                end
             end
         end
 
