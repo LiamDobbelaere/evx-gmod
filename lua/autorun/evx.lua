@@ -207,6 +207,10 @@ local evxConfig = {
                 enemy:AddEntityRelationship(ent, D_HT, 99)
                 ent:AddEntityRelationship(enemy, D_HT, 99)
             end
+
+            for i, v in ipairs(player.GetAll()) do
+                ent:AddEntityRelationship(v, D_HT, 99)
+            end
         end
     },
     turret = {
