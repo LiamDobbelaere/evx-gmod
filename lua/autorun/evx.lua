@@ -24,7 +24,8 @@ end
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack"
+    "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack",
+    "possessed"
 }
 local evxPendingInit = {}
 -- possible evx properties and hooks:
@@ -134,13 +135,59 @@ local evxConfig = {
         givedamage = function(target, dmginfo) dmginfo:SetDamage(1) end
     },
     possessed = {
-        -- https://www.youtube.com/watch?v=vFCwjkKWOdw
-        -- horror 2 on hurt
-        -- horror 1 on sight
-        -- horror 3 on death
-        -- horror 4 on attack
-        color = Color(10, 10, 10, 255),
-        tick = function() ent:SetPlaybackRate(100) end
+        spawn = function(ent)
+            ent:SetRenderFX(kRenderFxDistort)
+            ent:SetRenderMode(RENDERMODE_TRANSCOLOR)
+            ent.evxAttackTime = 0
+            ent.evxPainTime = 0
+        end,
+        color = Color(10, 10, 10, 10),
+        killed = function(ent)
+            local lvl = ent:GetNWInt("evxLevel", 1)
+            local radius = 0
+            local strength = 0
+
+            if lvl < 40 then
+                radius = 500
+                strength = 1
+            elseif lvl < 80 then
+                radius = 1000
+                strength = 2
+            else
+                radius = 1000
+                strength = 3
+            end
+
+            local nearbyStuff = ents.FindInSphere(ent:GetPos(), 1000)
+            for _, nearbyEnt in pairs(nearbyStuff) do
+                if IsValid(nearbyEnt) and IsValid(nearbyEnt:GetPhysicsObject()) then
+                    local phys = nearbyEnt:GetPhysicsObject()
+                    phys:ApplyForceCenter(
+                        (ent:GetPos() - nearbyEnt:GetPos()) * phys:GetMass() * 3)
+                end
+            end
+
+            ent:EmitSound(Sound("evx/horror3.wav"), 70, 100)
+        end,
+        takedamage = function(target, dmginfo)
+            local me = target
+
+            if me.evxPainTime and (CurTime() - me.evxPainTime > 6) then
+                me:EmitSound(Sound("evx/horror2.wav"), 70, 100)
+
+                me.evxPainTime = CurTime()
+            end
+        end,
+        givedamage = function(target, dmginfo)
+            local me = dmginfo:GetInflictor()
+
+            if me.evxAttackTime and (CurTime() - me.evxAttackTime > 6) then
+                me:EmitSound(Sound("evx/horror4.wav"), 70, 100)
+
+                me.evxAttackTime = CurTime()
+            end
+        end,
+        tick = function(ent) ent:SetPlaybackRate(100) end
     },
     rogue = {
         color = Color(0, 0, 255, 255),
@@ -355,7 +402,8 @@ properties.Add("variants", {
         local submenu = option:AddSubMenu()
 
         for k, v in pairs(evxTypes) do
-            submenu:AddOption(v, function() self:SetVariant(ent, v) end)
+            submenu:AddOption(v:gsub("^%l", string.upper),
+                              function() self:SetVariant(ent, v) end)
         end
     end,
     Action = function(self, ent) end,
@@ -565,6 +613,9 @@ if SERVER then
     CreateConVar("evx_rate_spidersack", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the spidersack ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_rate_possessed", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the possessed ev-x modifier in enemies", 0,
+                 100000)
     CreateConVar("evx_random_spiders_chance", "0.25",
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The odds of getting random spider babies around physics props, 1 means 100% of the time",
@@ -679,6 +730,7 @@ if SERVER then
         evxChances = {
             ["nothing"] = GetSpawnRateFor("nothing"),
             ["spidersack"] = GetSpawnRateFor("spidersack"),
+            ["possessed"] = GetSpawnRateFor("possessed"),
             ["gas"] = GetSpawnRateFor("gas"),
             ["lifesteal"] = GetSpawnRateFor("lifesteal"),
             ["metal"] = GetSpawnRateFor("metal"),
