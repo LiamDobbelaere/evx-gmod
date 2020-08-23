@@ -5,7 +5,7 @@ local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "rogue", "pyro", "lifesteal", "metal", "gnome", "gas"
+    "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack"
 }
 local evxPendingInit = {}
 -- possible evx properties and hooks:
@@ -58,25 +58,34 @@ local evxConfig = {
             gasCloud:SetPos(ent:GetPos())
             gasCloud:SetOwner(ent)
             gasCloud:Spawn()
+
+            gasCloud:EmitSound(Sound("evx/gas.wav"), 100, 100)
         end
     },
     spidersack = {
-        color = Color(255, 255, 255, 255),
+        color = Color(50, 100, 50, 255),
         spawn = function(ent) end,
         killed = function(ent, attacker, inflictor)
+            local lvl = ent:GetNWInt("evxLevel", 1)
+            local spiderCount = 0
+
+            if lvl < 40 then
+                spiderCount = 1
+            elseif lvl < 80 then
+                spiderCount = 2
+            else
+                spiderCount = 3
+            end
+
             local bmin, bmax = ent:GetModelBounds()
             local scale = ent:GetModelScale()
 
-            for i = -5, 5 do
-                for j = -5, 5 do
+            for i = -spiderCount, spiderCount do
+                for j = -spiderCount, spiderCount do
                     local baby = ents.Create("npc_headcrab_fast")
                     baby:SetPos(ent:GetPos() +
                                     Vector(i * bmax.x * scale,
                                            j * bmax.y * scale, 0))
-
-                    if IsValid(ent:GetActiveWeapon()) then
-                        baby:Give(ent:GetActiveWeapon():GetClass())
-                    end
 
                     baby:SetNWString("evxType", "spiderbaby")
                     baby:Spawn()
@@ -92,6 +101,17 @@ local evxConfig = {
         spawn = function(ent)
             ent:SetModelScale(0.2)
             ent:SetHealth(1)
+
+            if not ent.evxPermanent then
+                -- clean spiders up after 1 to 5 minutes
+                -- timer.Simple(math.Rand(60, 60 * 5), function()
+                timer.Simple(math.Rand(1, 2), function()
+
+                    if IsValid(ent) then
+                        ent:TakeDamage(1, ent, ent)
+                    end
+                end)
+            end
         end,
         tick = function(ent) ent:SetPlaybackRate(100) end,
         givedamage = function(target, dmginfo) dmginfo:SetDamage(1) end
@@ -519,7 +539,11 @@ if SERVER then
     CreateConVar("evx_rate_gnome", "2", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the gnome ev-x modifier in enemies", 0,
                  100000)
-
+    CreateConVar("evx_rate_gas", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the gas ev-x modifier in enemies", 0, 100000)
+    CreateConVar("evx_rate_spidersack", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the spidersack ev-x modifier in enemies", 0,
+                 100000)
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
     local function IsRandomizingOnRateChange()
         return GetConVar("evx_randomize_on_rate_change"):GetBool()
@@ -583,6 +607,25 @@ if SERVER then
     local function evxApply(ent)
         if not IsEvxEnabled() then return end
 
+        if ent:GetClass() == "prop_physics" and math.random() < 0.25 then
+            local baby = ents.Create("npc_headcrab_fast")
+
+            timer.Simple(0, function()
+                if IsValid(baby) and IsValid(ent) then
+                    local min, max = ent:GetCollisionBounds()
+
+                    baby:SetPos(ent:GetPos() + Vector(0, 0, max.z))
+                end
+            end)
+
+            baby.evxPermanent = true
+            baby:SetNWString("evxType", "spiderbaby")
+            baby:Spawn()
+            baby:Activate()
+
+            table.insert(evxPendingInit, baby)
+        end
+
         if IsValid(ent) and ent:IsNPC() then
             -- if they're an ally and the player doesn't want allies affected, bail out
             if not IsAffectingAllies() and allies[ent:GetClass()] then
@@ -623,8 +666,9 @@ if SERVER then
 
     local function recalculateWeights()
         evxChances = {
-            ["gas"] = 10000,
             ["nothing"] = GetSpawnRateFor("nothing"),
+            ["spidersack"] = GetSpawnRateFor("spidersack"),
+            ["gas"] = GetSpawnRateFor("gas"),
             ["lifesteal"] = GetSpawnRateFor("lifesteal"),
             ["metal"] = GetSpawnRateFor("metal"),
             ["gnome"] = GetSpawnRateFor("gnome"),
@@ -706,6 +750,11 @@ if SERVER then
         if IsUsingColors() then
             local variationStrength = math.max(0.4,
                                                ent:GetNWInt("evxLevel", 1) / 100)
+
+            if ent:GetNWString("evxType") == 'spiderbaby' then
+                variationStrength = 1
+            end
+
             local col = evxConfig[ent:GetNWString("evxType")].color
             local def = Color(255, 255, 255, 255)
             local lerpedCol = Color(Lerp(variationStrength, def.r, col.r),
