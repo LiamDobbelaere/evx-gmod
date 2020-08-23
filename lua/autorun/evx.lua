@@ -200,6 +200,10 @@ local evxConfig = {
             end
             npc:AddEntityRelationship(ent, D_HT, 99)
             ent:AddEntityRelationship(npc, D_HT, 99)
+
+            for i, v in ipairs(player.GetAll()) do
+                ent:AddEntityRelationship(v, D_HT, 99)
+            end
         end,
         spawn = function(ent)
             local enemies = ents.FindByClass("npc_*")
@@ -757,7 +761,7 @@ if SERVER then
     CreateConVar("evx_level_use_color_intensity", "1",
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Use color intensity to display an ev-x enemy's level", 0, 1)
-    CreateConVar("evx_random_spiders_chance", "0.25",
+    CreateConVar("evx_random_spiders_chance", "0.02",
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The odds of getting random spider babies around physics props, 1 means 100% of the time",
                  0, 1)
@@ -1015,7 +1019,6 @@ if SERVER then
 
             ent:SetColor(lerpedCol)
         end
-        safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
 
         if ent:GetNWString("evxType2", false) then
             ent:SetMaterial("models/shiny")
@@ -1028,6 +1031,8 @@ if SERVER then
 
             safeCall(evxConfig[ent:GetNWString("evxType2")].spawn, ent)
         end
+
+        safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
 
         if evxConfig[ent:GetNWString("evxType")].tick ~= nil then
             evxTickNPCs[ent] = true
