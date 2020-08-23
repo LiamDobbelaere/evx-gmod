@@ -32,15 +32,30 @@ function ENT:Initialize()
     self:SetRenderMode(RENDERMODE_NONE)
     self:SetMoveType(MOVETYPE_NONE)
     self:SetSolid(SOLID_NONE)
-    self.life = 15
+    self.sphereRadius = 0
 
-    ParticleEffect("evx_gas_infinite", self:GetPos(), Angle(0, 0, 0), self)
+    if not self.life then self.life = 15 end
+    if not self.size then self.size = 'small' end
+
+    if self.size == 'small' then
+        self.sphereRadius = 270
+    elseif self.size == 'medium' then
+        self.sphereRadius = 350
+    elseif self.size == 'large' then
+        self.sphereRadius = 500
+    elseif self.size == 'huge' then
+        self.sphereRadius = 1000
+    end
+
+    -- small, medium, large, huge
+    ParticleEffect("evx_gas_infinite_" .. self.size, self:GetPos(),
+                   Angle(0, 0, 0), self)
 end
 
 function ENT:Think()
     if CLIENT then return end
 
-    local nearbyEnts = ents.FindInSphere(self:GetPos(), 350)
+    local nearbyEnts = ents.FindInSphere(self:GetPos(), self.sphereRadius)
     local dmg = DamageInfo()
     dmg:SetDamage(8)
     dmg:SetAttacker(self)

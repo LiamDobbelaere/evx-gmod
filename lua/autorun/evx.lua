@@ -20,18 +20,41 @@ local evxConfig = {
     explosion = {
         color = Color(255, 0, 0, 255),
         killed = function(ent, attacker, inflictor)
+            local explosionMagnitude = tostring(
+                                           ent:GetNWInt("evxLevel", 1) / 100 *
+                                               240) -- pre-level was 80
             local explode = ents.Create("env_explosion")
             explode:SetPos(ent:GetPos())
             explode:SetOwner(ent)
             explode:Spawn()
-            explode:SetKeyValue("iMagnitude", "80")
+            explode:SetKeyValue("iMagnitude", explosionMagnitude)
             explode:Fire("Explode", 0, 0)
         end
     },
     gas = {
         color = Color(80, 255, 0, 255),
         killed = function(ent, attacker, inflictor)
+            local lvl = ent:GetNWInt("evxLevel", 1)
+            local size = 'small'
+            local lifetime = 0
+
+            if lvl < 20 then
+                size = 'small'
+                lifetime = 15
+            elseif lvl < 40 then
+                size = 'medium'
+                lifetime = 15
+            elseif lvl < 80 then
+                size = 'large'
+                lifetime = 20
+            else
+                size = 'huge'
+                lifetime = 25
+            end
+
             local gasCloud = ents.Create("sent_evx_gascloud")
+            gasCloud.size = size
+            gasCloud.life = lifetime
             gasCloud:SetPos(ent:GetPos())
             gasCloud:SetOwner(ent)
             gasCloud:Spawn()
@@ -332,7 +355,7 @@ properties.Add("variantslevel", {
     MenuOpen = function(self, option, ent, tr)
         local submenu = option:AddSubMenu()
 
-        for _, v in pairs({5, 10, 20, 50, 70, 100}) do
+        for _, v in pairs({1, 5, 15, 30, 50, 70, 90, 100}) do
             submenu:AddOption('Lv. ' .. v,
                               function() self:SetVariantLevel(ent, v) end)
         end
@@ -351,6 +374,7 @@ properties.Add("variantslevel", {
         if (not self:Filter(ent, player)) then return end
 
         ent:SetNWInt("evxLevel", level)
+        table.insert(evxPendingInit, ent)
     end
 })
 
@@ -409,12 +433,18 @@ if CLIENT then
         local text = 'Lv. ' .. level
         local font = "TargetID"
         local levelColor = Color(180, 180, 180)
-        if level >= 70 then
-            levelColor = Color(255, 0, 0)
+        if level >= 90 then
+            levelColor = Color(255, 0, 0) -- red
+        elseif level >= 70 then
+            levelColor = Color(255, 128, 0) -- orange
         elseif level >= 50 then
-            levelColor = Color(255, 255, 0)
-        elseif level >= 20 then
-            levelColor = Color(0, 128, 255)
+            levelColor = Color(255, 255, 0) -- yellow
+        elseif level >= 30 then
+            levelColor = Color(0, 128, 255) -- blue
+        elseif level >= 15 then
+            levelColor = Color(0, 255, 200) -- green-blue
+        elseif level >= 5 then
+            levelColor = Color(0, 255, 0) -- green
         end
 
         surface.SetFont(font)
@@ -531,6 +561,25 @@ if SERVER then
     local evxChances = {}
     local weightSum = 0
 
+    local function randomEnemyLevel()
+        local selectedRange = math.random(100)
+        local min = 0
+        local max = 0
+
+        if selectedRange < 50 then
+            min = 1
+            max = 45
+        elseif selectedRange < 95 then
+            min = 45
+            max = 75
+        else
+            min = 75
+            max = 100
+        end
+
+        return math.random(min, max)
+    end
+
     local function evxApply(ent)
         if not IsEvxEnabled() then return end
 
@@ -556,8 +605,7 @@ if SERVER then
                     end
 
                     ent:SetNWString("evxType", k)
-                    -- TODO: random level with weights !!
-                    ent:SetNWInt("evxLevel", math.random(1, 100))
+                    ent:SetNWInt("evxLevel", randomEnemyLevel())
                     table.insert(evxPendingInit, ent)
                     break
                 end
@@ -656,7 +704,15 @@ if SERVER then
         ent:SetMaterial("")
 
         if IsUsingColors() then
-            ent:SetColor(evxConfig[ent:GetNWString("evxType")].color)
+            local variationStrength = math.max(0.4,
+                                               ent:GetNWInt("evxLevel", 1) / 100)
+            local col = evxConfig[ent:GetNWString("evxType")].color
+            local def = Color(255, 255, 255, 255)
+            local lerpedCol = Color(Lerp(variationStrength, def.r, col.r),
+                                    Lerp(variationStrength, def.g, col.g),
+                                    Lerp(variationStrength, def.b, col.b))
+
+            ent:SetColor(lerpedCol)
         end
         safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
 
