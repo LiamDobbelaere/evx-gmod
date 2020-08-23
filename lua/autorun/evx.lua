@@ -107,6 +107,7 @@ local evxConfig = {
                                     Vector(i * bmax.x * scale,
                                            j * bmax.y * scale, 0))
 
+                    baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
                     baby:SetNWString("evxType", "spiderbaby")
                     baby:Spawn()
                     baby:Activate()
@@ -253,9 +254,12 @@ local evxConfig = {
     pyro = {
         color = Color(255, 128, 0, 255),
         givedamage = function(target, dmginfo)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local igniteTime = lvl * 4
+
             if target:IsPlayer() or target:IsNPC() or
                 IsValid(target:GetPhysicsObject()) then
-                target:Ignite(1.5)
+                target:Ignite(igniteTime)
             end
         end
     },
@@ -264,9 +268,13 @@ local evxConfig = {
         givedamage = function(target, dmginfo)
             local attacker = dmginfo:GetInflictor()
 
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local lifestealFactor = lvl * 4
+
             if target:IsPlayer() or target:IsNPC() then
                 if IsValid(attacker) and attacker:IsNPC() then
-                    local lifestealDamage = dmginfo:GetDamage() * 2
+                    local lifestealDamage =
+                        dmginfo:GetDamage() * lifestealFactor
                     if attacker:Health() < attacker:GetMaxHealth() then
                         attacker:SetHealth(
                             math.min(attacker:Health() + lifestealDamage,
@@ -286,8 +294,11 @@ local evxConfig = {
             ent:SetHealth(ent:Health() * 8)
         end,
         givedamage = function(target, dmginfo)
-            dmginfo:ScaleDamage(2)
-            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local dmg = lvl * 4
+
+            dmginfo:ScaleDamage(dmg)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * dmg)
         end
     },
     bigboss = {
@@ -297,6 +308,9 @@ local evxConfig = {
             ent:SetHealth(ent:Health() * 16)
         end,
         givedamage = function(target, dmginfo)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local dmg = lvl * 8
+
             dmginfo:ScaleDamage(4)
             dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
         end
@@ -322,6 +336,7 @@ local evxConfig = {
                     baby:Give(ent:GetActiveWeapon():GetClass())
                 end
 
+                baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
                 baby:SetNWString("evxType", "motherchild")
                 baby:Spawn()
                 baby:Activate()
@@ -337,19 +352,25 @@ local evxConfig = {
             ent:SetHealth(ent:Health() / 3)
         end,
         givedamage = function(target, dmginfo)
-            dmginfo:ScaleDamage(0.5)
-            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 0.5)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local dmg = lvl * 2
+
+            dmginfo:ScaleDamage(dmg)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * dmg)
         end
     },
     knockback = {
         color = Color(255, 0, 255, 255),
         givedamage = function(target, dmginfo)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local knockback = lvl * 3
+
             if target:IsPlayer() or target:IsNPC() then
-                target:SetVelocity(dmginfo:GetDamageForce() * 1.5)
+                target:SetVelocity(dmginfo:GetDamageForce() * knockback)
             else
                 if IsValid(target:GetPhysicsObject()) then
                     target:GetPhysicsObject():SetVelocity(
-                        dmginfo:GetDamageForce() * 1.5)
+                        dmginfo:GetDamageForce() * knockback)
                 end
             end
 
@@ -358,19 +379,23 @@ local evxConfig = {
     puller = {
         color = Color(0, 255, 0, 255),
         givedamage = function(target, dmginfo)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local pullAmount = lvl * -3
+            local stunAmount = lvl * 0.4
+
             if target:IsPlayer() or target:IsNPC() then
-                target:SetVelocity(dmginfo:GetDamageForce() * -1)
+                target:SetVelocity(dmginfo:GetDamageForce() * pullAmount)
                 -- stun effect
                 if target:IsPlayer() then
                     target:Freeze(true)
-                    timer.Simple(.3, function()
+                    timer.Simple(stunAmount, function()
                         target:Freeze(false)
                     end)
                 end
             else
                 if IsValid(target:GetPhysicsObject()) then
                     target:GetPhysicsObject():SetVelocity(
-                        dmginfo:GetDamageForce() * -1)
+                        dmginfo:GetDamageForce() * pullAmount)
                 end
             end
 
@@ -383,8 +408,12 @@ local evxConfig = {
             ent:SetHealth(ent:Health() / 2)
         end,
         givedamage = function(target, dmginfo)
-            dmginfo:ScaleDamage(1.5)
-            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 2)
+            local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
+            local scaledDamage = lvl * 3
+            local force = lvl * 4
+
+            dmginfo:ScaleDamage(scaledDamage)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * force)
         end
     }
 }
