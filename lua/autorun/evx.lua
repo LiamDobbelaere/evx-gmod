@@ -3,6 +3,25 @@ AddCSLuaFile()
 -- shared
 local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
+local function randomEnemyLevel()
+    local selectedRange = math.random(100)
+    local min = 0
+    local max = 0
+
+    if selectedRange < 50 then
+        min = 1
+        max = 45
+    elseif selectedRange < 95 then
+        min = 45
+        max = 75
+    else
+        min = 75
+        max = 100
+    end
+
+    return math.random(min, max)
+end
+
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
     "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack"
@@ -104,9 +123,7 @@ local evxConfig = {
 
             if not ent.evxPermanent then
                 -- clean spiders up after 1 to 5 minutes
-                -- timer.Simple(math.Rand(60, 60 * 5), function()
-                timer.Simple(math.Rand(1, 2), function()
-
+                timer.Simple(math.Rand(60, 60 * 5), function()
                     if IsValid(ent) then
                         ent:TakeDamage(1, ent, ent)
                     end
@@ -354,6 +371,10 @@ properties.Add("variants", {
 
         if (not self:Filter(ent, player)) then return end
 
+        if ent:GetNWString("evxType", false) == false then
+            ent:SetNWInt("evxLevel", randomEnemyLevel())
+        end
+
         ent:SetNWString("evxType", variant)
         table.insert(evxPendingInit, ent)
     end
@@ -544,6 +565,11 @@ if SERVER then
     CreateConVar("evx_rate_spidersack", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the spidersack ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_random_spiders_chance", "0.25",
+                 {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The odds of getting random spider babies around physics props, 1 means 100% of the time",
+                 0, 1)
+
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
     local function IsRandomizingOnRateChange()
         return GetConVar("evx_randomize_on_rate_change"):GetBool()
@@ -556,6 +582,9 @@ if SERVER then
     end
     local function GetSpawnRateFor(type)
         return GetConVar("evx_rate_" .. type):GetInt()
+    end
+    local function GetRandomSpidersChance()
+        return GetConVar("evx_random_spiders_chance"):GetFloat()
     end
 
     local evxNPCs = {}
@@ -585,29 +614,11 @@ if SERVER then
     local evxChances = {}
     local weightSum = 0
 
-    local function randomEnemyLevel()
-        local selectedRange = math.random(100)
-        local min = 0
-        local max = 0
-
-        if selectedRange < 50 then
-            min = 1
-            max = 45
-        elseif selectedRange < 95 then
-            min = 45
-            max = 75
-        else
-            min = 75
-            max = 100
-        end
-
-        return math.random(min, max)
-    end
-
     local function evxApply(ent)
         if not IsEvxEnabled() then return end
 
-        if ent:GetClass() == "prop_physics" and math.random() < 0.25 then
+        if ent:GetClass() == "prop_physics" and math.random() <
+            GetRandomSpidersChance() then
             local baby = ents.Create("npc_headcrab_fast")
 
             timer.Simple(0, function()
