@@ -202,7 +202,7 @@ local evxConfig = {
             ent:AddEntityRelationship(npc, D_HT, 99)
 
             for i, v in ipairs(player.GetAll()) do
-                ent:AddEntityRelationship(v, D_HT, 99)
+                npc:AddEntityRelationship(v, D_HT, 99)
             end
         end,
         spawn = function(ent)
