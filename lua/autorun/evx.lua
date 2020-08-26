@@ -316,8 +316,8 @@ local evxConfig = {
             local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
             local dmg = lvl * 8
 
-            dmginfo:ScaleDamage(4)
-            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * 4)
+            dmginfo:ScaleDamage(dmg)
+            dmginfo:SetDamageForce(dmginfo:GetDamageForce() * dmg)
         end
     },
     mother = {
@@ -953,18 +953,9 @@ if SERVER then
     recalculateWeights()
 
     cvars.AddChangeCallback("evx_rate_nothing", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_knockback", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_puller", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_pyro", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_lifesteal", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_explosion", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_cloaked", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_mother", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_boss", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_rogue", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_bigboss", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_metal", recalculateWeights)
-    cvars.AddChangeCallback("evx_rate_gnome", recalculateWeights)
+    for k, v in pairs(evxTypes) do
+        cvars.AddChangeCallback("evx_rate_" .. v, recalculateWeights)
+    end
 
     concommand.Add("evx_rate_reset_all", function()
         GetConVar("evx_rate_nothing"):Revert()
