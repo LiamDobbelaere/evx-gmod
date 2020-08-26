@@ -346,6 +346,7 @@ local evxConfig = {
                 baby:SetNWString("evxType2", nil)
                 baby:Spawn()
                 baby:Activate()
+                baby:SetModel(ent:GetModel())
 
                 table.insert(evxPendingInit, baby)
             end
