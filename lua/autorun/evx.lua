@@ -50,7 +50,8 @@ local evxTypes = {
 local deployableTypes = {
     ["gas"] = true,
     ["explosion"] = true,
-    ["possessed"] = true
+    ["possessed"] = true,
+    ["mother"] = true
 }
 table.sort(evxTypes)
 evxPendingInit = {}
