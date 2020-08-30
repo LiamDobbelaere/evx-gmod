@@ -3,6 +3,19 @@ AddCSLuaFile()
 -- shared
 local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
+local function HasValidEVXType(ent) return ent:GetNWString("evxType", "") ~= "" end
+
+local evxPlayerNPCs = {}
+
+local function resetEVXFor(ent)
+    ent:SetNWString("evxType", "")
+    ent:SetNWInt("evxLevel", 0)
+    ent:SetColor(Color(255, 255, 255, 255))
+    ent:SetModelScale(1)
+
+    evxPlayerNPCs[ent] = nil
+end
+
 local function randomEnemyLevel()
     local selectedRange = math.random(100)
     local min = 0
@@ -22,13 +35,25 @@ local function randomEnemyLevel()
     return math.random(min, max)
 end
 
+local bannedEssences = {
+    ["cloaked"] = true,
+    ["rogue"] = true,
+    ["spidersack"] = true,
+    ["motherchild"] = true,
+    ["spiderbaby"] = true
+}
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
     "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack",
     "possessed", "mix2"
 }
+local deployableTypes = {
+    ["gas"] = true,
+    ["explosion"] = true,
+    ["possessed"] = true
+}
 table.sort(evxTypes)
-local evxPendingInit = {}
+evxPendingInit = {}
 -- possible evx properties and hooks:
 -- color - ev-x NPC color
 -- spawn(ent) - ev-x NPC spawn function 
@@ -37,50 +62,139 @@ local evxPendingInit = {}
 -- givedamage(target, dmginfo) - ev-x NPC is giving damage
 -- tick(ent) - ev-x tick, ent is the ev-x NPC itself
 -- killed(ent, attacker, inflictor) - ev-x NPC was killed
+
+local function evxExplosionKilled(ent, pos)
+    local explosionMagnitude = tostring(ent:GetNWInt("evxLevel", 1) / 100 * 240) -- pre-level was 80
+    local explode = ents.Create("env_explosion")
+    explode:SetPos(pos)
+    explode:SetOwner(ent)
+    explode:Spawn()
+    explode:SetKeyValue("iMagnitude", explosionMagnitude)
+    explode:Fire("Explode", 0, 0)
+end
+
+local function evxGasKilled(ent, pos)
+    local lvl = ent:GetNWInt("evxLevel", 1)
+    local size = 'small'
+    local lifetime = 0
+
+    if lvl < 20 then
+        size = 'small'
+        lifetime = 15
+    elseif lvl < 40 then
+        size = 'medium'
+        lifetime = 15
+    elseif lvl < 80 then
+        size = 'large'
+        lifetime = 20
+    else
+        size = 'huge'
+        lifetime = 25
+    end
+
+    local gasCloud = ents.Create("sent_evx_gascloud")
+    gasCloud.size = size
+    gasCloud.life = lifetime
+    gasCloud:SetPos(pos)
+    gasCloud:SetOwner(ent)
+    gasCloud:Spawn()
+
+    gasCloud:EmitSound(Sound("evx/gas.wav"), 100, 100)
+end
+
+local function evxPossessedKilled(ent, pos)
+    local lvl = ent:GetNWInt("evxLevel", 1)
+    local radius = 0
+    local strength = 0
+
+    if lvl < 40 then
+        radius = 500
+        strength = 1
+    elseif lvl < 80 then
+        radius = 1000
+        strength = 2
+    else
+        radius = 1000
+        strength = 3
+    end
+
+    local nearbyStuff = ents.FindInSphere(pos, 1000)
+    for _, nearbyEnt in pairs(nearbyStuff) do
+        if IsValid(nearbyEnt) and IsValid(nearbyEnt:GetPhysicsObject()) then
+            local phys = nearbyEnt:GetPhysicsObject()
+            phys:ApplyForceCenter((pos - nearbyEnt:GetPos()) * phys:GetMass() *
+                                      3)
+        end
+    end
+
+    ent:EmitSound(Sound("evx/horror3.wav"), 70, 100)
+end
+
+local function evxMotherKilled(ent, pos)
+    local bmin, bmax = ent:GetModelBounds()
+    local scale = ent:GetModelScale()
+    local positions = {
+        Vector(-bmax.x * scale, bmax.y * scale, 0),
+        Vector(bmax.x * scale, bmax.y * scale, 0),
+        Vector(-bmax.x * scale, -bmax.y * scale, 0),
+        Vector(bmax.x * scale, -bmax.y * scale, 0)
+    }
+
+    for i, position in ipairs(positions) do
+        local baby = nil
+        if ent:IsPlayer() then
+            baby = ents.Create("npc_citizen")
+        else
+            baby = ents.Create(ent:GetClass())
+        end
+
+        baby:SetPos(pos + position)
+
+        if (ent:IsNPC() or ent:IsPlayer()) and IsValid(ent:GetActiveWeapon()) then
+            baby:Give(ent:GetActiveWeapon():GetClass())
+        end
+
+        if ent:IsPlayer() then baby:Give("weapon_smg1") end
+
+        baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
+        baby:SetNWString("evxType", "motherchild")
+        baby:SetNWString("evxType2", nil)
+        baby:Spawn()
+        baby:Activate()
+
+        if not ent:IsPlayer() then baby:SetModel(ent:GetModel()) end
+
+        table.insert(evxPendingInit, baby)
+    end
+end
+
 local evxConfig = {
     explosion = {
         color = Color(255, 0, 0, 255),
         killed = function(ent, attacker, inflictor)
-            local explosionMagnitude = tostring(
-                                           ent:GetNWInt("evxLevel", 1) / 100 *
-                                               240) -- pre-level was 80
-            local explode = ents.Create("env_explosion")
-            explode:SetPos(ent:GetPos())
-            explode:SetOwner(ent)
-            explode:Spawn()
-            explode:SetKeyValue("iMagnitude", explosionMagnitude)
-            explode:Fire("Explode", 0, 0)
+            evxExplosionKilled(ent, ent:GetPos())
+        end,
+        plysecondary = function(ply)
+            local trace = ply:GetEyeTrace()
+            if not trace.Hit then return end
+
+            evxExplosionKilled(ply, trace.HitPos)
+
+            resetEVXFor(ply)
         end
     },
     gas = {
         color = Color(80, 255, 0, 255),
         killed = function(ent, attacker, inflictor)
-            local lvl = ent:GetNWInt("evxLevel", 1)
-            local size = 'small'
-            local lifetime = 0
+            evxGasKilled(ent, ent:GetPos())
+        end,
+        plysecondary = function(ply)
+            local trace = ply:GetEyeTrace()
+            if not trace.Hit then return end
 
-            if lvl < 20 then
-                size = 'small'
-                lifetime = 15
-            elseif lvl < 40 then
-                size = 'medium'
-                lifetime = 15
-            elseif lvl < 80 then
-                size = 'large'
-                lifetime = 20
-            else
-                size = 'huge'
-                lifetime = 25
-            end
+            evxGasKilled(ply, trace.HitPos)
 
-            local gasCloud = ents.Create("sent_evx_gascloud")
-            gasCloud.size = size
-            gasCloud.life = lifetime
-            gasCloud:SetPos(ent:GetPos())
-            gasCloud:SetOwner(ent)
-            gasCloud:Spawn()
-
-            gasCloud:EmitSound(Sound("evx/gas.wav"), 100, 100)
+            resetEVXFor(ply)
         end
     },
     spidersack = {
@@ -145,32 +259,14 @@ local evxConfig = {
             ent.evxPainTime = 0
         end,
         color = Color(10, 10, 10, 10),
-        killed = function(ent)
-            local lvl = ent:GetNWInt("evxLevel", 1)
-            local radius = 0
-            local strength = 0
+        killed = function(ent) evxPossessedKilled(ent, ent:GetPos()) end,
+        plysecondary = function(ply)
+            local trace = ply:GetEyeTrace()
+            if not trace.Hit then return end
 
-            if lvl < 40 then
-                radius = 500
-                strength = 1
-            elseif lvl < 80 then
-                radius = 1000
-                strength = 2
-            else
-                radius = 1000
-                strength = 3
-            end
+            evxPossessedKilled(ply, trace.HitPos)
 
-            local nearbyStuff = ents.FindInSphere(ent:GetPos(), 1000)
-            for _, nearbyEnt in pairs(nearbyStuff) do
-                if IsValid(nearbyEnt) and IsValid(nearbyEnt:GetPhysicsObject()) then
-                    local phys = nearbyEnt:GetPhysicsObject()
-                    phys:ApplyForceCenter(
-                        (ent:GetPos() - nearbyEnt:GetPos()) * phys:GetMass() * 3)
-                end
-            end
-
-            ent:EmitSound(Sound("evx/horror3.wav"), 70, 100)
+            resetEVXFor(ply)
         end,
         takedamage = function(target, dmginfo)
             local me = target
@@ -198,11 +294,17 @@ local evxConfig = {
             if not ent:IsNPC() or ent:GetClass() == npc:GetClass() then
                 return
             end
-            npc:AddEntityRelationship(ent, D_HT, 99)
+
+            if npc:IsNPC() then
+                npc:AddEntityRelationship(ent, D_HT, 99)
+            end
+
             ent:AddEntityRelationship(npc, D_HT, 99)
 
-            for i, v in ipairs(player.GetAll()) do
-                npc:AddEntityRelationship(v, D_HT, 99)
+            if npc:IsNPC() then
+                for i, v in ipairs(player.GetAll()) do
+                    npc:AddEntityRelationship(v, D_HT, 99)
+                end
             end
         end,
         spawn = function(ent)
@@ -212,11 +314,16 @@ local evxConfig = {
                     return
                 end
                 enemy:AddEntityRelationship(ent, D_HT, 99)
-                ent:AddEntityRelationship(enemy, D_HT, 99)
+
+                if ent:IsNPC() then
+                    ent:AddEntityRelationship(enemy, D_HT, 99)
+                end
             end
 
-            for i, v in ipairs(player.GetAll()) do
-                ent:AddEntityRelationship(v, D_HT, 99)
+            if ent:IsNPC() then
+                for i, v in ipairs(player.GetAll()) do
+                    ent:AddEntityRelationship(v, D_HT, 99)
+                end
             end
         end
     },
@@ -234,7 +341,7 @@ local evxConfig = {
         spawn = function(ent) ent:SetMaterial("debug/env_cubemap_model") end,
         takedamage = function(target, dmginfo)
             if not dmginfo:IsDamageType(DMG_BLAST) then
-                dmginfo:ScaleDamage(0)
+                dmginfo:ScaleDamage(0.1)
             end
             dmginfo:SetDamageType(DMG_SHOCK)
         end
@@ -275,10 +382,15 @@ local evxConfig = {
             local attacker = dmginfo:GetInflictor()
 
             local lvl = dmginfo:GetInflictor():GetNWInt("evxLevel", 1) / 100
-            local lifestealFactor = lvl * 4
+            local lifestealFactor = 0
+            if attacker:IsPlayer() then
+                lifestealFactor = lvl * 2
+            else
+                lifestealFactor = lvl * 4
+            end
 
             if target:IsPlayer() or target:IsNPC() then
-                if IsValid(attacker) and attacker:IsNPC() then
+                if IsValid(attacker) then
                     local lifestealDamage =
                         dmginfo:GetDamage() * lifestealFactor
                     if attacker:Health() < attacker:GetMaxHealth() then
@@ -324,32 +436,15 @@ local evxConfig = {
         color = Color(255, 255, 0, 255),
         spawn = function(ent) ent:SetModelScale(1.5) end,
         killed = function(ent, attacker, inflictor)
-            local bmin, bmax = ent:GetModelBounds()
-            local scale = ent:GetModelScale()
-            local positions = {
-                Vector(-bmax.x * scale, bmax.y * scale, 0),
-                Vector(bmax.x * scale, bmax.y * scale, 0),
-                Vector(-bmax.x * scale, -bmax.y * scale, 0),
-                Vector(bmax.x * scale, -bmax.y * scale, 0)
-            }
+            evxMotherKilled(ent, ent:GetPos())
+        end,
+        plysecondary = function(ply)
+            local trace = ply:GetEyeTrace()
+            if not trace.Hit then return end
 
-            for i, position in ipairs(positions) do
-                local baby = ents.Create(ent:GetClass())
-                baby:SetPos(ent:GetPos() + position)
+            evxMotherKilled(ply, trace.HitPos + Vector(0, 0, 200))
 
-                if ent:IsNPC() and IsValid(ent:GetActiveWeapon()) then
-                    baby:Give(ent:GetActiveWeapon():GetClass())
-                end
-
-                baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
-                baby:SetNWString("evxType", "motherchild")
-                baby:SetNWString("evxType2", nil)
-                baby:Spawn()
-                baby:Activate()
-                baby:SetModel(ent:GetModel())
-
-                table.insert(evxPendingInit, baby)
-            end
+            resetEVXFor(ply)
         end
     },
     motherchild = {
@@ -463,7 +558,7 @@ properties.Add("variants", {
 
         if (not self:Filter(ent, player)) then return end
 
-        if ent:GetNWString("evxType", false) == false then
+        if HasValidEVXType(ent) == false then
             ent:SetNWInt("evxLevel", randomEnemyLevel())
         end
 
@@ -479,7 +574,7 @@ properties.Add("variants2", {
     Filter = function(self, ent, ply)
         if (not IsValid(ent)) then return false end
         if (not ent:IsNPC()) then return false end
-        if (ent:GetNWString("evxType", false) == false) then return false end
+        if (HasValidEVXType(ent) == false) then return false end
         if (not gamemode.Call("CanProperty", ply, "variants", ent)) then
             return false
         end
@@ -577,8 +672,11 @@ if CLIENT then
 
             panel:NumSlider("Random spiders chance",
                             "evx_random_spiders_chance", 0, 1)
+            panel:NumSlider("Essence drop chance", "evx_essence_chance", 0, 1)
+            panel:NumSlider("Essence timer factor", "evx_essence_timer_factor",
+                            0, 100)
 
-            panel:Button("RESET all spawn rates", "evx_rate_reset_all")
+            panel:Button("RESET all", "evx_rate_reset_all")
         end)
 
         spawnmenu.AddToolMenuOption("Utilities", "EV-X", "General", "General",
@@ -591,8 +689,69 @@ if CLIENT then
                            "evx_level_use_color_intensity")
             panel:CheckBox("Randomize on rate change",
                            "evx_randomize_on_rate_change")
+            panel:CheckBox("Enable music events", "evx_allow_music")
             panel:NumSlider("Force level", "evx_level_force", 0, 100)
         end)
+    end)
+
+    hook.Add("HUDPaint", "HUDPaintEVXSelf", function()
+        if not HasValidEVXType(LocalPlayer()) then return end
+
+        local essenceStart = LocalPlayer():GetNWFloat("essenceStart", CurTime())
+        local essenceTimePassed = CurTime() - essenceStart
+        local essenceMax = LocalPlayer():GetNWFloat("essenceMax", 0)
+        local essenceTimeLeft = essenceMax - essenceTimePassed
+        local essenceTimeLeftString = " (" .. math.Round(essenceTimeLeft) ..
+                                          " seconds left)"
+
+        if essenceTimeLeft > 800 then essenceTimeLeftString = "" end
+
+        text =
+            "Active: " .. string.upper(LocalPlayer():GetNWString("evxType")) ..
+                " Lv." .. LocalPlayer():GetNWInt("evxLevel", -1) ..
+                essenceTimeLeftString
+        evxType = LocalPlayer():GetNWString("evxType")
+
+        local font = "DermaLarge"
+
+        surface.SetFont(font)
+        local w, h = surface.GetTextSize(text)
+
+        local MouseX, MouseY = gui.MousePos()
+
+        if (MouseX == 0 and MouseY == 0) then
+
+            MouseX = ScrW() / 2
+            MouseY = ScrH() - 128
+        end
+
+        local x = MouseX
+        local y = MouseY
+
+        x = x - w / 2
+        y = y + 30
+
+        -- The fonts internal drop shadow looks lousy with AA on
+        draw.RoundedBox(4, x - 8, y - 8, w + 16, h + 16, Color(0, 0, 0, 200))
+        draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 120))
+        draw.SimpleText(text, font, x + 4, y + 4, Color(0, 0, 0, 50))
+        draw.SimpleText(text, font, x, y, evxConfig[evxType].color)
+
+        if deployableTypes[LocalPlayer():GetNWString("evxType")] then
+            text = "CROUCH + SECONDARY FIRE TO DEPLOY SPECIAL"
+            font = "TargetID"
+
+            x = ScrW() / 2
+            y = ScrH() / 3
+
+            surface.SetFont(font)
+            local w, h = surface.GetTextSize(text)
+            local x = MouseX - w / 2
+
+            draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+            draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+            draw.SimpleText(text, font, x, y, evxConfig[LocalPlayer():GetNWString("evxType")].color)
+        end
     end)
 
     hook.Add("HUDPaint", "HUDPaint_DrawABox", function()
@@ -608,8 +767,13 @@ if CLIENT then
         local evxType = ""
         local evxType2 = ""
 
-        if trace.Entity:GetNWString("evxType", false) then
+        if HasValidEVXType(trace.Entity) then
             text = string.upper(trace.Entity:GetNWString("evxType"))
+
+            if trace.Entity:GetClass() == "sent_evx_essence" then
+                text = text .. " ESSENCE"
+            end
+
             evxType = trace.Entity:GetNWString("evxType")
         else
             return
@@ -683,24 +847,28 @@ if CLIENT then
         draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
         draw.SimpleText(text, font, x, y, levelColor)
 
-        y = y + h + 5
+        if not (trace.Entity:GetClass() == "sent_evx_essence") then
+            y = y + h + 5
 
-        local text = trace.Entity:Health() .. " HP"
-        local font = "TargetID"
+            local text = trace.Entity:Health() .. " HP"
+            local font = "TargetID"
 
-        surface.SetFont(font)
-        local w, h = surface.GetTextSize(text)
-        local x = MouseX - w / 2
+            surface.SetFont(font)
+            local w, h = surface.GetTextSize(text)
+            local x = MouseX - w / 2
 
-        draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
-        draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
-        draw.SimpleText(text, font, x, y, Color(255, 255, 255))
+            draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+            draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+            draw.SimpleText(text, font, x, y, Color(255, 255, 255))
+        end
     end)
 end
 
 if SERVER then
     CreateConVar("evx_enabled", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable enemy variations", 0, 1)
+    CreateConVar("evx_allow_music", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Enable EV-X music events", 0, 1)
     CreateConVar("evx_affect_allies", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Include allies like Alyx, rebels or animals in getting variations",
                  0, 1)
@@ -757,6 +925,14 @@ if SERVER then
     CreateConVar("evx_rate_possessed", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the possessed ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_essence_chance", "0.2", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The odds of getting an essence drop from an enemy, 1 means 100% of the time",
+                 0, 1)
+    CreateConVar("evx_essence_timer_factor", "1",
+                 {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Change the multiplier of the essence time calculation, 2 would result in double essence time for everything",
+                 0, 100000)
+
     CreateConVar("evx_level_force", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Force a level for all ev-x enemies, 0 to disable", 0, 100)
     CreateConVar("evx_level_use_color_intensity", "1",
@@ -768,6 +944,9 @@ if SERVER then
                  0, 1)
 
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
+    local function CanPlayMusic()
+        return GetConVar("evx_allow_music"):GetBool()
+    end
     local function IsRandomizingOnRateChange()
         return GetConVar("evx_randomize_on_rate_change"):GetBool()
     end
@@ -785,6 +964,12 @@ if SERVER then
     end
     local function GetRandomSpidersChance()
         return GetConVar("evx_random_spiders_chance"):GetFloat()
+    end
+    local function GetEssenceChance()
+        return GetConVar("evx_essence_chance"):GetFloat()
+    end
+    local function GetEssenceTimerFactor()
+        return GetConVar("evx_essence_timer_factor"):GetFloat()
     end
     local function GetForcedLevel()
         return GetConVar("evx_level_force"):GetInt()
@@ -894,8 +1079,7 @@ if SERVER then
         end
 
         for evxNPC, _ in pairs(evxNPCs) do
-            if IsValid(evxNPC) and evxNPC:IsNPC() and
-                evxNPC:GetNWString("evxType", false) then
+            if IsValid(evxNPC) and HasValidEVXType(evxNPC) then
                 safeCall(evxConfig[evxNPC:GetNWString("evxType")].entitycreated,
                          evxNPC, ent)
             end
@@ -964,6 +1148,8 @@ if SERVER then
             GetConVar("evx_rate_" .. v):Revert()
         end
         GetConVar("evx_random_spiders_chance"):Revert()
+        GetConVar("evx_essence_chance"):Revert()
+        GetConVar("evx_essence_timer_factor"):Revert()
         GetConVar("evx_level_force"):Revert()
     end)
 
@@ -991,7 +1177,11 @@ if SERVER then
     function evxInit(ent)
         -- reset these before a modifier changes it
         ent:SetModelScale(1)
-        ent:SetHealth(ent:GetMaxHealth())
+        if not ent:IsPlayer() then
+            ent:SetHealth(ent:GetMaxHealth())
+        else
+            ent:SetHealth(math.min(ent:GetMaxHealth(), ent:Health() + 15))
+        end
         ent:SetMaterial("")
         ent:SetRenderFX(kRenderFxNone)
         ent:SetRenderMode(RENDERMODE_NORMAL)
@@ -1031,15 +1221,29 @@ if SERVER then
         end
 
         evxNPCs[ent] = true
+
+        if ent:IsPlayer() then evxPlayerNPCs[ent] = true end
     end
 
-    hook.Add("OnNPCKilled", "EVXOnNPCKilled", function(ent, attacker, inflictor)
+    local function EVXOnKilled(ent, attacker, inflictor)
         if not IsEvxEnabled() then return end
 
         -- we're a ev-x enemy getting killed
-        if IsValid(ent) and ent:GetNWString("evxType", false) then
+        if IsValid(ent) and HasValidEVXType(ent) then
             safeCall(evxConfig[ent:GetNWString("evxType")].killed, ent,
                      attacker, inflictor)
+
+            if not bannedEssences[ent:GetNWString("evxType")] and math.random() <
+                GetEssenceChance() then
+                local essence = ents.Create("sent_evx_essence")
+                essence:SetPos(ent:GetPos())
+                essence:SetAngles(ent:GetAngles())
+                essence:Spawn()
+                essence:Activate()
+
+                essence:SetEVXType(ent:GetNWString("evxType"),
+                                   ent:GetNWInt("evxLevel"), evxConfig)
+            end
 
             if ent:GetNWString("evxType2", false) then
                 safeCall(evxConfig[ent:GetNWString("evxType2")].killed, ent,
@@ -1047,14 +1251,27 @@ if SERVER then
             end
 
             evxNPCs[ent] = nil
+            evxPlayerNPCs[ent] = nil
             evxTickNPCs[ent] = nil
             evxMixNPCs[ent] = nil
         end
+    end
+
+    hook.Add("OnNPCKilled", "EVXOnNPCKilled", function(ent, attacker, inflictor)
+        EVXOnKilled(ent, attacker, inflictor)
+    end)
+
+    hook.Add("PlayerDeath", "EVXOnPlayerKilled",
+             function(ent, inflictor, attacker)
+        EVXOnKilled(ent, attacker, inflictor)
+
+        if HasValidEVXType(ent) then resetEVXFor(ent) end
     end)
 
     hook.Add("EntityRemoved", "EVXEntityRemoved", function(ent)
-        if IsValid(ent) and ent:GetNWString("evxType", false) then
+        if IsValid(ent) and HasValidEVXType(ent) then
             evxNPCs[ent] = nil
+            evxPlayerNPCs[ent] = nil
             evxTickNPCs[ent] = nil
             evxMixNPCs[ent] = nil
         end
@@ -1065,7 +1282,7 @@ if SERVER then
         if not IsEvxEnabled() then return end
 
         -- we're a ev-x enemy taking damage
-        if IsValid(target) and target:GetNWString("evxType", false) then
+        if IsValid(target) and HasValidEVXType(target) then
             safeCall(evxConfig[target:GetNWString("evxType")].takedamage,
                      target, dmginfo)
 
@@ -1078,7 +1295,7 @@ if SERVER then
         -- we're an entity taking damage from an ev-x enemy
         if IsValid(target) and IsEntity(target) and
             IsValid(dmginfo:GetAttacker()) and
-            dmginfo:GetAttacker():GetNWString("evxType", false) then
+            HasValidEVXType(dmginfo:GetAttacker()) then
             safeCall(evxConfig[dmginfo:GetAttacker():GetNWString("evxType")]
                          .givedamage, target, dmginfo)
 
@@ -1092,18 +1309,44 @@ if SERVER then
 
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", evxApply)
 
+    hook.Add("KeyPress", "EVXKeyPress", function(ply, key)
+        if IsValid(ply) and HasValidEVXType(ply) then
+            if key == IN_ATTACK2 and ply:Crouching() then
+                safeCall(evxConfig[ply:GetNWString("evxType")].plysecondary, ply)
+            end
+        end
+    end)
+
     hook.Add("Think", "EVXThink", function()
         if not IsEvxEnabled() then return end
 
         for evxPendingIndex = 1, #evxPendingInit do
             local evxNPC = evxPendingInit[evxPendingIndex]
-            if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) then
+            if IsValid(evxNPC) and HasValidEVXType(evxNPC) then
+                if evxNPC:IsPlayer() then
+                    local level = evxNPC:GetNWInt("evxLevel", 0)
+
+                    evxNPC:SetNWFloat("essenceMax", 1 / level * 8000 *
+                                          GetEssenceTimerFactor())
+
+                    if level == 100 and CanPlayMusic() then
+                        evxNPC:EmitSound("evx/credits.mp3")
+                    end
+                end
+
                 evxInit(evxNPC)
             end
         end
 
+        for evxPlayerNPC, _ in pairs(evxPlayerNPCs) do
+            if CurTime() - evxPlayerNPC:GetNWFloat("essenceStart", 0) >
+                evxPlayerNPC:GetNWFloat("essenceMax", 0) then
+                resetEVXFor(evxPlayerNPC)
+            end
+        end
+
         for evxNPC, _ in pairs(evxTickNPCs) do
-            if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) then
+            if IsValid(evxNPC) and HasValidEVXType(evxNPC) then
                 safeCall(evxConfig[evxNPC:GetNWString("evxType")].tick, evxNPC)
             end
 
@@ -1114,7 +1357,7 @@ if SERVER then
 
         if IsUsingColors() then
             for evxNPC, _ in pairs(evxMixNPCs) do
-                if IsValid(evxNPC) and evxNPC:GetNWString("evxType", false) and
+                if IsValid(evxNPC) and HasValidEVXType(evxNPC) and
                     evxNPC:GetNWString("evxType2", false) then
                     if evxNPC.evxMix2Flash == nil then
                         evxNPC.evxMix2Flash = false
