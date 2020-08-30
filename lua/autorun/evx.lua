@@ -750,7 +750,9 @@ if CLIENT then
 
             draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
             draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
-            draw.SimpleText(text, font, x, y, evxConfig[LocalPlayer():GetNWString("evxType")].color)
+            draw.SimpleText(text, font, x, y,
+                            evxConfig[LocalPlayer():GetNWString("evxType")]
+                                .color)
         end
     end)
 
