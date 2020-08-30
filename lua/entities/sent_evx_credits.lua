@@ -74,6 +74,12 @@ local textStrings = {
         wobbleFac = 1.5,
         wobbleSpeedFac = 1
     }, {
+        text = "ts.5678: player variations",
+        color = cblue,
+        maxTime = 2.222 * 2,
+        wobbleFac = 1.5,
+        wobbleSpeedFac = 1
+    }, {
         text = "And everyone else\nwho provided suggestions!",
         color = cblue,
         maxTime = 2.222 * 2,
