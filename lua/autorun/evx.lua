@@ -90,12 +90,16 @@ local bannedEssences = {
     ["rogue"] = true,
     ["spidersack"] = true,
     ["motherchild"] = true,
-    ["spiderbaby"] = true
+    ["spiderbaby"] = true,
+    ["chimera"] = true
 }
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2"
+    "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2", "chimera"
+}
+local evxTypesChimera = {
+    "knockback", "pyro", "lifesteal", "metal", "possessed", "psychic"
 }
 local deployableTypes = {
     ["gas"] = true,
@@ -311,6 +315,7 @@ local evxConfig = {
             ent.evxPainTime = 0
             ent.evxTotalDamageTaken = 0
             ent.evxLastTeleportTime = CurTime()
+            ent.evxChimeraAngry = math.random(2)
             -- ent.evxSolidTime = CurTime() - 5
         end,
         color = Color(10, 10, 10, 10),
@@ -339,17 +344,19 @@ local evxConfig = {
                 (me:Health() - dmginfo:GetDamage()) > 0 then
                 me.evxTotalDamageTaken = 0
 
-                -- Teleport far away
-                local signX = -1 + (math.random(0, 1) * 2)
-                local signY = -1 + (math.random(0, 1) * 2)
+                if not me.evxChimera then
+                    -- Teleport far away
+                    local signX = -1 + (math.random(0, 1) * 2)
+                    local signY = -1 + (math.random(0, 1) * 2)
 
-                local randVec = Vector(math.random(500, 1000) * signX,
-                                       math.random(500, 1000) * signY, 0)
-                me:SetPos(me:GetPos() + randVec)
-                me:SetRenderMode(RENDERMODE_NONE)
+                    local randVec = Vector(math.random(500, 1000) * signX,
+                                           math.random(500, 1000) * signY, 0)
+                    me:SetPos(me:GetPos() + randVec)
+                    me:SetRenderMode(RENDERMODE_NONE)
 
-                -- Delay random teleporting extra much
-                me.evxLastTeleportTime = CurTime() + math.random(1, 4)
+                    -- Delay random teleporting extra much
+                    me.evxLastTeleportTime = CurTime() + math.random(1, 4)
+                end
             end
         end,
         givedamage = function(target, dmginfo)
@@ -369,7 +376,12 @@ local evxConfig = {
             -- if CurTime() - ent.evxSolidTime > 1.5 and ent:GetSolid() ~=
             --    SOLID_BBOX then ent:SetSolid(SOLID_BBOX) end
 
-            if ent:IsNPC() and CurTime() - ent.evxLastTeleportTime > 3 then
+            local tptime = 3
+            if ent.evxChimera and ent.evxChimeraAngry == 1 then
+                tptime = 0.01
+            end
+
+            if ent:IsNPC() and CurTime() - ent.evxLastTeleportTime > tptime then
                 local nearbyStuff = ents.FindInSphere(ent:GetPos(), 2000)
                 for _, nearbyEnt in pairs(nearbyStuff) do
                     if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
@@ -392,6 +404,89 @@ local evxConfig = {
 
                 ent.evxLastTeleportTime = CurTime()
                 -- ent.evxSolidTime = CurTime()
+            end
+        end
+    },
+    chimera = {
+        color = Color(255, 255, 255, 255),
+        spawn = function(ent)
+            ent:SetNWInt("evxLevel", 100)
+            ent:SetHealth(1000)
+
+            local anim = ents.Create("base_anim")
+            anim:SetPos(ent:GetPos() + Vector(200, 0, 100))
+            anim:SetAngles((ent:GetPos() - anim:GetPos()):Angle())
+            anim:SetRenderMode(RENDERMODE_NONE)
+            anim:Spawn()
+            anim:Activate()
+
+            timer.Simple(3, function()
+                if (IsValid(anim)) then anim:Remove() end
+
+                for _, ply in ipairs(player.GetAll()) do
+                    ply:SetViewEntity(ply)
+                end
+            end)
+
+            net.Start("EVX_Chimera_Boss")
+            net.Broadcast()
+
+            for _, ply in ipairs(player.GetAll()) do
+                ply:SetViewEntity(anim)
+            end
+
+            ent.evxTypeSwitchTimer = CurTime()
+            ent.evxChimera = true
+        end,
+        killed = function()
+            net.Start("EVX_Chimera_Boss_End")
+            net.Broadcast()
+        end,
+        givedamage = function(target, dmginfo)
+            local me = dmginfo:GetInflictor()
+
+            local rndType = evxTypesChimera[math.random(#evxTypesChimera)]
+
+            timer.Simple(0, function()
+                if (IsValid(me)) then
+                    me:SetNWString("evxType2", rndType)
+                    table.insert(evxPendingInit, me)
+                end
+            end)
+
+            me.evxTypeSwitchTimer = CurTime()
+        end,
+        tick = function(ent)
+            if CurTime() - ent.evxTypeSwitchTimer > 3 then
+                local rndType = evxTypesChimera[math.random(#evxTypesChimera)]
+
+                timer.Simple(0, function()
+                    if (IsValid(ent)) then
+                        ent:SetNWString("evxType2", rndType)
+                        table.insert(evxPendingInit, ent)
+                    end
+                end)
+
+                ent.evxTypeSwitchTimer = CurTime()
+            end
+
+            -- ent:SetHealth(ent:Health() + 1)
+        end
+    },
+    psychic = {
+        color = Color(255, 128, 128, 255),
+        spawn = function(ent) ent.evxLastDisturbTime = CurTime() - 10 end,
+        tick = function(ent)
+            if CurTime() - ent.evxLastDisturbTime > 10 then
+                local nearbyStuff = ents.FindInSphere(ent:GetPos(), 1000)
+                for _, nearbyEnt in pairs(nearbyStuff) do
+                    if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
+                        net.Start("EVX_Chimera_Psychic")
+                        net.Send(nearbyEnt)
+                        ent.evxLastDisturbTime = CurTime()
+                        break
+                    end
+                end
             end
         end
     },
@@ -758,6 +853,48 @@ properties.Add("variantslevel", {
 })
 
 if CLIENT then
+    net.Receive("EVX_Chimera_Boss", function(len)
+        if GetConVar("evx_allow_music"):GetBool() then
+            if (LocalPlayer().evxMusic) then
+                LocalPlayer().evxMusic:Stop()
+            end
+
+            LocalPlayer().evxMusic = CreateSound(LocalPlayer(),
+                                                 "evx/chimera.wav")
+            LocalPlayer().evxMusic:Play()
+        end
+    end)
+
+    net.Receive("EVX_Chimera_Boss_End", function(len)
+        if (LocalPlayer().evxMusic) then LocalPlayer().evxMusic:Stop() end
+    end)
+
+    net.Receive("EVX_Chimera_Psychic", function(len)
+        timer.Simple(0.05, function() LocalPlayer():ConCommand("+menu") end)
+        timer.Simple(0.1, function() LocalPlayer():ConCommand("-menu") end)
+        timer.Simple(0.15, function() LocalPlayer():ConCommand("+menu") end)
+        timer.Simple(0.2, function() LocalPlayer():ConCommand("-menu") end)
+        timer.Simple(0.25, function() LocalPlayer():ConCommand("+menu") end)
+        timer.Simple(0.3, function() LocalPlayer():ConCommand("-menu") end)
+        timer.Simple(0.35, function() LocalPlayer():ConCommand("+menu") end)
+        timer.Simple(0.4, function() LocalPlayer():ConCommand("-menu") end)
+        timer.Simple(0.45, function() LocalPlayer():ConCommand("+menu") end)
+        timer.Simple(0.5, function() LocalPlayer():ConCommand("-menu") end)
+        timer.Simple(1, function() LocalPlayer():ConCommand("+attack") end)
+        timer.Simple(1, function() LocalPlayer():ConCommand("+jump") end)
+        timer.Simple(2, function() LocalPlayer():ConCommand("-attack") end)
+        timer.Simple(2, function() LocalPlayer():ConCommand("-jump") end)
+        timer.Simple(3, function() LocalPlayer():ConCommand("+attack") end)
+        timer.Simple(3, function() LocalPlayer():ConCommand("+jump") end)
+        timer.Simple(4, function() LocalPlayer():ConCommand("-attack") end)
+        timer.Simple(4, function() LocalPlayer():ConCommand("-jump") end)
+        timer.Simple(5, function()
+            if math.random(20) == 1 then
+                LocalPlayer():ConCommand("say I always play this bad, I'm sorry")
+            end
+        end)
+    end)
+
     CreateClientConVar("evx_draw_hud", "1", true, false,
                        "Disable drawing the ev-x hud, like displaying NPC health and type",
                        0, 1)
@@ -948,6 +1085,11 @@ if CLIENT then
             levelColor = Color(0, 255, 0) -- green
         end
 
+        if evxType == "chimera" then
+            text = "Lv. " .. math.random(1000, 9999)
+            levelColor = Color(255, 0, 255)
+        end
+
         surface.SetFont(font)
         local w, h = surface.GetTextSize(text)
         local x = MouseX - w / 2
@@ -974,6 +1116,10 @@ if CLIENT then
 end
 
 if SERVER then
+    util.AddNetworkString("EVX_Chimera_Boss")
+    util.AddNetworkString("EVX_Chimera_Boss_End")
+    util.AddNetworkString("EVX_Chimera_Psychic")
+
     CreateConVar("evx_enabled", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable enemy variations", 0, 1)
     CreateConVar("evx_allow_music", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
@@ -1186,18 +1332,12 @@ if SERVER then
                 end
             end
         end
-
-        for evxNPC, _ in pairs(evxNPCs) do
-            if IsValid(evxNPC) and HasValidEVXType(evxNPC) then
-                safeCall(evxConfig[evxNPC:GetNWString("evxType")].entitycreated,
-                         evxNPC, ent)
-            end
-        end
     end
 
     local function recalculateWeights()
         evxChances = {
             ["nothing"] = GetSpawnRateFor("nothing"),
+            ["chimera"] = 100000,
             -- ["spidersack"] = GetSpawnRateFor("spidersack"),
             ["possessed"] = GetSpawnRateFor("possessed"),
             ["gas"] = GetSpawnRateFor("gas"),
@@ -1287,7 +1427,9 @@ if SERVER then
         -- reset these before a modifier changes it
         ent:SetModelScale(1)
         if not ent:IsPlayer() then
-            ent:SetHealth(ent:GetMaxHealth())
+            if not ent.evxChimera then
+                ent:SetHealth(ent:GetMaxHealth())
+            end
         else
             ent:SetHealth(math.min(ent:GetMaxHealth(), ent:Health() + 15))
         end
@@ -1324,7 +1466,10 @@ if SERVER then
             safeCall(evxConfig[ent:GetNWString("evxType2")].spawn, ent)
         end
 
-        safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
+        -- prevent chimera from re-initializing
+        if not ent.evxChimera then
+            safeCall(evxConfig[ent:GetNWString("evxType")].spawn, ent)
+        end
 
         if evxConfig[ent:GetNWString("evxType")].tick ~= nil then
             evxTickNPCs[ent] = true
@@ -1385,6 +1530,11 @@ if SERVER then
             evxTickNPCs[ent] = nil
             evxMixNPCs[ent] = nil
         end
+
+        if HasValidEVXType(ent) and ent:GetNWString("evxType") == "chimera" then
+            net.Start("EVX_Chimera_Boss_End")
+            net.Broadcast()
+        end
     end)
 
     hook.Add("EntityTakeDamage", "EVXEntityTakeDamage",
@@ -1417,7 +1567,16 @@ if SERVER then
         end
     end)
 
-    hook.Add("OnEntityCreated", "EVXSpawnedNPC", evxApply)
+    hook.Add("OnEntityCreated", "EVXSpawnedNPC", function(ent)
+        evxApply(ent)
+
+        for evxNPC, _ in pairs(evxNPCs) do
+            if IsValid(evxNPC) and HasValidEVXType(evxNPC) then
+                safeCall(evxConfig[evxNPC:GetNWString("evxType")].entitycreated,
+                         evxNPC, ent)
+            end
+        end
+    end)
 
     hook.Add("KeyPress", "EVXKeyPress", function(ply, key)
         if IsValid(ply) and HasValidEVXType(ply) then
