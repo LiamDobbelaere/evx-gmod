@@ -56,6 +56,7 @@ local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 local function HasValidEVXType(ent) return ent:GetNWString("evxType", "") ~= "" end
 
 local evxPlayerNPCs = {}
+local evxChimeraActive = false
 
 local function resetEVXFor(ent)
     ent:SetNWString("evxType", "")
@@ -91,12 +92,16 @@ local bannedEssences = {
     ["spidersack"] = true,
     ["motherchild"] = true,
     ["spiderbaby"] = true,
-    ["chimera"] = true
+    ["chimera"] = true,
+    ["cloner"] = true,
+    ["clone"] = true,
+    ["detonation"] = true
 }
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2", "chimera"
+    "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2",
+    "chimera", "detonation"
 }
 local evxTypesChimera = {
     "knockback", "pyro", "lifesteal", "metal", "possessed", "psychic"
@@ -223,6 +228,42 @@ local function evxMotherKilled(ent, pos)
     end
 end
 
+local function evxClonerSpawn(ent, pos)
+    local bmin, bmax = ent:GetModelBounds()
+    local scale = ent:GetModelScale()
+    local positions = {Vector(-bmax.x * scale, bmax.y * scale, 0)}
+
+    for i, position in ipairs(positions) do
+        local baby = nil
+        if ent:IsPlayer() then
+            baby = ents.Create("npc_citizen")
+        else
+            baby = ents.Create(ent:GetClass())
+        end
+
+        baby:SetPos(pos + position)
+
+        if (ent:IsNPC() or ent:IsPlayer()) and IsValid(ent:GetActiveWeapon()) then
+            baby:Give(ent:GetActiveWeapon():GetClass())
+        end
+
+        if ent:IsPlayer() then baby:Give("weapon_smg1") end
+
+        baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
+        baby:SetNWString("evxType", "clone")
+        baby:SetNWString("evxType2",
+                         evxTypesChimera[math.random(#evxTypesChimera)])
+        baby:Spawn()
+        baby:Activate()
+        baby.evxOwner = ent
+        ent.evxCloneCount = ent.evxCloneCount + 1
+
+        if not ent:IsPlayer() then baby:SetModel(ent:GetModel()) end
+
+        table.insert(evxPendingInit, baby)
+    end
+end
+
 local evxConfig = {
     explosion = {
         color = Color(255, 0, 0, 255),
@@ -236,6 +277,51 @@ local evxConfig = {
             evxExplosionKilled(ply, trace.HitPos)
 
             resetEVXFor(ply)
+        end
+    },
+    detonation = {
+        color = Color(255, 80, 0, 255),
+        spawn = function(ent)
+            ent.evxLastBeepTime = CurTime()
+            ent.evxBeepFrequency = 0.5
+            ent.evxBeepPitch = 0
+            ent.detonationFuse = CurTime()
+        end,
+        tick = function(ent)
+            if CurTime() - ent.evxLastBeepTime > ent.evxBeepFrequency then
+                ent:EmitSound("HL1/fvox/beep.wav", 75, ent.evxBeepPitch)
+                ent.evxLastBeepTime = CurTime()
+
+                local closestDistance = 100000
+                local nearbyStuff = ents.FindInSphere(ent:GetPos(), 500)
+                for _, nearbyEnt in pairs(nearbyStuff) do
+                    if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
+                        local dist = ent:GetPos():DistToSqr(nearbyEnt:GetPos())
+
+                        if dist < closestDistance then
+                            closestDistance = dist
+                        end
+                    end
+                end
+
+                if closestDistance < 120 * 120 then
+                    ent.evxBeepFrequency = 0.15
+                    ent.evxBeepPitch = 140
+
+                    if CurTime() - ent.detonationFuse > 1.5 then
+                        evxExplosionKilled(ent, ent:GetPos())
+                        ent:TakeDamage(10000)
+                    end
+                    -- elseif closestDistance < 250 * 250 then
+                    --    ent.evxBeepFrequency = 0.5
+                    --    ent.evxBeepPitch = 0
+                    --    ent.detonationFuse = CurTime()
+                else
+                    ent.evxBeepFrequency = 0.5
+                    ent.evxBeepPitch = 0
+                    ent.detonationFuse = CurTime()
+                end
+            end
         end
     },
     gas = {
@@ -331,6 +417,8 @@ local evxConfig = {
         takedamage = function(target, dmginfo)
             local me = target
 
+            if not me.evxTotalDamageTaken then return end
+
             me.evxTotalDamageTaken = me.evxTotalDamageTaken +
                                          dmginfo:GetDamage()
 
@@ -410,6 +498,8 @@ local evxConfig = {
     chimera = {
         color = Color(255, 255, 255, 255),
         spawn = function(ent)
+            evxChimeraActive = true
+
             ent:SetNWInt("evxLevel", 100)
             ent:SetHealth(1000)
 
@@ -420,7 +510,7 @@ local evxConfig = {
             anim:Spawn()
             anim:Activate()
 
-            timer.Simple(3, function()
+            timer.Simple(2, function()
                 if (IsValid(anim)) then anim:Remove() end
 
                 for _, ply in ipairs(player.GetAll()) do
@@ -439,8 +529,15 @@ local evxConfig = {
             ent.evxChimera = true
         end,
         killed = function()
+            evxChimeraActive = false
+
             net.Start("EVX_Chimera_Boss_End")
             net.Broadcast()
+        end,
+        takedamage = function(target, dmginfo)
+            dmginfo:SetDamageType(DMG_GENERIC)
+            if dmginfo:GetDamage() > 10 then dmginfo:SetDamage(10) end
+
         end,
         givedamage = function(target, dmginfo)
             local me = dmginfo:GetInflictor()
@@ -487,6 +584,29 @@ local evxConfig = {
                         break
                     end
                 end
+            end
+        end
+    },
+    cloner = {
+        color = Color(100, 100, 255, 255),
+        spawn = function(ent)
+            if not ent.evxCloneCount then ent.evxCloneCount = 0 end
+
+            if ent.evxCloneCount == 0 then
+                timer.Simple(0, function()
+                    if IsValid(ent) then
+                        evxClonerSpawn(ent, ent:GetPos())
+                    end
+                end)
+            end
+        end
+    },
+    clone = {
+        color = Color(255, 255, 255, 255),
+        spawn = function(ent) ent:SetHealth(10) end,
+        killed = function(ent)
+            if IsValid(ent.evxOwner) and ent.evxOwner.evxCloneCount then
+                ent.evxOwner.evxCloneCount = ent.evxOwner.evxCloneCount - 1
             end
         end
     },
@@ -693,7 +813,9 @@ local evxConfig = {
                 if target:IsPlayer() then
                     target:Freeze(true)
                     timer.Simple(stunAmount, function()
-                        target:Freeze(false)
+                        if IsValid(target) then
+                            target:Freeze(false)
+                        end
                     end)
                 end
             else
@@ -854,6 +976,9 @@ properties.Add("variantslevel", {
 
 if CLIENT then
     net.Receive("EVX_Chimera_Boss", function(len)
+        LocalPlayer():ChatPrint(
+            "Your friendly neighbourhood chimera has spawned!")
+
         if GetConVar("evx_allow_music"):GetBool() then
             if (LocalPlayer().evxMusic) then
                 LocalPlayer().evxMusic:Stop()
@@ -870,16 +995,26 @@ if CLIENT then
     end)
 
     net.Receive("EVX_Chimera_Psychic", function(len)
-        timer.Simple(0.05, function() LocalPlayer():ConCommand("+menu") end)
-        timer.Simple(0.1, function() LocalPlayer():ConCommand("-menu") end)
-        timer.Simple(0.15, function() LocalPlayer():ConCommand("+menu") end)
-        timer.Simple(0.2, function() LocalPlayer():ConCommand("-menu") end)
-        timer.Simple(0.25, function() LocalPlayer():ConCommand("+menu") end)
-        timer.Simple(0.3, function() LocalPlayer():ConCommand("-menu") end)
-        timer.Simple(0.35, function() LocalPlayer():ConCommand("+menu") end)
-        timer.Simple(0.4, function() LocalPlayer():ConCommand("-menu") end)
-        timer.Simple(0.45, function() LocalPlayer():ConCommand("+menu") end)
-        timer.Simple(0.5, function() LocalPlayer():ConCommand("-menu") end)
+        timer.Simple(0.05,
+                     function() LocalPlayer():ConCommand("+menu_context") end)
+        timer.Simple(0.1,
+                     function() LocalPlayer():ConCommand("-menu_context") end)
+        timer.Simple(0.15,
+                     function() LocalPlayer():ConCommand("+menu_context") end)
+        timer.Simple(0.2,
+                     function() LocalPlayer():ConCommand("-menu_context") end)
+        timer.Simple(0.25,
+                     function() LocalPlayer():ConCommand("+menu_context") end)
+        timer.Simple(0.3,
+                     function() LocalPlayer():ConCommand("-menu_context") end)
+        timer.Simple(0.35,
+                     function() LocalPlayer():ConCommand("+menu_context") end)
+        timer.Simple(0.4,
+                     function() LocalPlayer():ConCommand("-menu_context") end)
+        timer.Simple(0.45,
+                     function() LocalPlayer():ConCommand("+menu_context") end)
+        timer.Simple(0.5,
+                     function() LocalPlayer():ConCommand("-menu_context") end)
         timer.Simple(1, function() LocalPlayer():ConCommand("+attack") end)
         timer.Simple(1, function() LocalPlayer():ConCommand("+jump") end)
         timer.Simple(2, function() LocalPlayer():ConCommand("-attack") end)
@@ -1046,9 +1181,15 @@ if CLIENT then
         y = y + 30
 
         -- The fonts internal drop shadow looks lousy with AA on
-        draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
-        draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
-        draw.SimpleText(text, font, x, y, evxConfig[evxType].color)
+        if evxType == "chimera" then
+            draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+            draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+            draw.SimpleText(text, font, x, y, Color(255, 255, 255, 255))
+        else
+            draw.SimpleText(text, font, x + 1, y + 1, Color(0, 0, 0, 120))
+            draw.SimpleText(text, font, x + 2, y + 2, Color(0, 0, 0, 50))
+            draw.SimpleText(text, font, x, y, evxConfig[evxType].color)
+        end
 
         if trace.Entity:GetNWString("evxType2", false) then
             text = string.upper(trace.Entity:GetNWString("evxType2"))
@@ -1150,6 +1291,9 @@ if SERVER then
     CreateConVar("evx_rate_explosion", "30", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the explosion ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_rate_detonation", "25", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the detonation ev-x modifier in enemies", 0,
+                 100000)
     CreateConVar("evx_rate_cloaked", "30", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the cloaked ev-x modifier in enemies", 0,
                  100000)
@@ -1161,6 +1305,9 @@ if SERVER then
     CreateConVar("evx_rate_rogue", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the rogue ev-x modifier in enemies", 0,
                  100000)
+    CreateConVar("evx_rate_chimera", "100", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The chance that a killed NPC becomes a chimera boss, 1 out of X",
+                 0, 100000)
     CreateConVar("evx_rate_bigboss", "5", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the bigboss ev-x modifier in enemies", 0,
                  100000)
@@ -1255,6 +1402,8 @@ if SERVER then
         ["monster_scientist"] = 1
     }
 
+    local function IsChimeraActive() return evxChimeraActive end
+
     local evxChances = {}
     local evxChancesMix = {}
     local weightSum = 0
@@ -1337,8 +1486,8 @@ if SERVER then
     local function recalculateWeights()
         evxChances = {
             ["nothing"] = GetSpawnRateFor("nothing"),
-            ["chimera"] = 100000,
             -- ["spidersack"] = GetSpawnRateFor("spidersack"),
+            ["detonation"] = GetSpawnRateFor("detonation"),
             ["possessed"] = GetSpawnRateFor("possessed"),
             ["gas"] = GetSpawnRateFor("gas"),
             ["lifesteal"] = GetSpawnRateFor("lifesteal"),
@@ -1500,6 +1649,23 @@ if SERVER then
                                    ent:GetNWInt("evxLevel"), evxConfig)
             end
 
+            -- Chimera boss
+            if math.random(1, GetSpawnRateFor("chimera")) == 1 and
+                not IsChimeraActive() then
+                local boss = ents.Create("npc_combine_s")
+                boss.evxIgnore = true
+                boss:SetPos(ent:GetPos())
+                boss:SetAngles(Angle(0, 0, 0))
+                boss:Spawn()
+                boss:Activate()
+                boss:SetHealth(1001)
+
+                boss:Give("weapon_smg1")
+                boss:SetNWString("evxType", "chimera")
+
+                table.insert(evxPendingInit, boss)
+            end
+
             if ent:GetNWString("evxType2", false) then
                 safeCall(evxConfig[ent:GetNWString("evxType2")].killed, ent,
                          attacker, inflictor)
@@ -1532,6 +1698,8 @@ if SERVER then
         end
 
         if HasValidEVXType(ent) and ent:GetNWString("evxType") == "chimera" then
+            evxChimeraActive = false
+
             net.Start("EVX_Chimera_Boss_End")
             net.Broadcast()
         end
