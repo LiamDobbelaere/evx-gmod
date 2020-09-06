@@ -1,5 +1,55 @@
 AddCSLuaFile()
 
+-- TODO: Disable specific types (especially spidersack & rogue)
+-- TODO: Extend possessed type (vision impairments? teleport to player? make very slow & deadly? heavy breathing?) X
+-- TODO: Variant that gives players a bleed effect (player effects could open up the way for cool new variants)
+-- TODO: Variant that is an illusionist (pretends to be something else)
+-- TODO: Variant that resurrects NPCs
+-- TODO: Variant that protects NPCs
+-- TODO: Variant that buffs NPCs
+-- TODO: Variant that attracts props (psychic, think Psycho Mantis)
+-- TODO: Variant that slows you
+-- TODO: Variant that explodes when near (like a creeper)
+-- TODO: Variant that emits gas while walking
+-- TODO: Variant that increases damage the more damage it deals
+-- TODO: Variant that can temporarily become invulnerable and deal more damage
+-- TODO: Variant that can infect other players or NPCs
+-- TODO: More deployables?
+
+--[[ 
+- Variant that throws grenades at the player (Vladbzf)
+- Variant that buffs NPCs around them (Lord Crown Empire)
+- Variant that attracts props (Vladbzf)
+- Variant that protects other NPCs with a shield/force field (crobles74)
+- Variant that's like the charger from L4D (EPIC MANN)
+- Variant that randomly teleports (zorich_michael)
+- Variant that immediately seeks out the player, no matter where they are (KnightBob7)
+- Variant that you pay to fight for you (KnightBob7)
+- Variant that resurrects NPCs assigned to them (Lord Crown Empire)
+- Variant that can shape shift into a different Npc (Apples / Jerkakame's 'spy' idea)
+- Variant that disguises itself with a random variant enemy that is currently on the map, this makes the GUI think it's that enemy and its variant, once it is at 25% hp, it will reveal itself what it really is and the GUI will show it properly (crobles74)
+- Variant that disguises as a player (Lord Crown Empire)
+- Variant that's mix3/mix4 (KnightBob7)
+- Variant like lifesteal but unbounded to the max health (Vladbzf)
+- Variant that slows you down (crobles74)
+- Variant like gas, but emits gas while walking (Vladbzf)
+- Variant that gives player vision impairments (Mercury, zorich_michael)
+- Variant that heals other NPCs (EPIC MANN)
+- Variant that revives after death (racism barney)
+- Variant that increases damage the more damage he deals, or upon kill (Vladbzf)
+- Variant that can temporarily become invulnerable and deals more damage (Lord Crown Empire)
+- Variant that is armored (Apples)
+- Variant that changes size (for example when shot?) (crobles74)
+- Variant that has damage resistance (Vladbzf)
+- Variant that works like a Minecraft creeper, explode when near player (Mercury)
+- Variant with even more variations than mix2? (crobles74)
+- Variant with health regeneration (Vladbzf)
+- Variant like mother but that spawns different variant babies (crobles74)
+- Variant that gives players a 'bleed' effect (Mercury)
+- Variant that is your ally (Mercury)
+- Variant that can infect a player or NPC (Apples / Jerkakame)
+]]
+
 -- shared
 local function safeCall(f, ...) if f ~= nil then f(unpack({...})) end end
 
@@ -42,6 +92,7 @@ local bannedEssences = {
     ["motherchild"] = true,
     ["spiderbaby"] = true
 }
+
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
     "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack",
@@ -256,8 +307,12 @@ local evxConfig = {
         spawn = function(ent)
             ent:SetRenderFX(kRenderFxDistort)
             ent:SetRenderMode(RENDERMODE_TRANSCOLOR)
+            -- ent:SetSolid(SOLID_BBOX)
             ent.evxAttackTime = 0
             ent.evxPainTime = 0
+            ent.evxTotalDamageTaken = 0
+            ent.evxLastTeleportTime = CurTime()
+            -- ent.evxSolidTime = CurTime() - 5
         end,
         color = Color(10, 10, 10, 10),
         killed = function(ent) evxPossessedKilled(ent, ent:GetPos()) end,
@@ -272,22 +327,74 @@ local evxConfig = {
         takedamage = function(target, dmginfo)
             local me = target
 
-            if me.evxPainTime and (CurTime() - me.evxPainTime > 6) then
-                me:EmitSound(Sound("evx/horror2.wav"), 70, 100)
+            me.evxTotalDamageTaken = me.evxTotalDamageTaken +
+                                         dmginfo:GetDamage()
 
+            if me:IsNPC() and me.evxPainTime and
+                (CurTime() - me.evxPainTime > 6) then
+                me:EmitSound(Sound("evx/horror2.wav"), 70, 100)
                 me.evxPainTime = CurTime()
+            end
+
+            if me:IsNPC() and me.evxTotalDamageTaken / me:GetMaxHealth() > 0.25 and
+                (me:Health() - dmginfo:GetDamage()) > 0 then
+                me.evxTotalDamageTaken = 0
+
+                -- Teleport far away
+                local signX = -1 + (math.random(0, 1) * 2)
+                local signY = -1 + (math.random(0, 1) * 2)
+
+                local randVec = Vector(math.random(500, 1000) * signX,
+                                       math.random(500, 1000) * signY, 0)
+                me:SetPos(me:GetPos() + randVec)
+                me:SetRenderMode(RENDERMODE_NONE)
+
+                -- Delay random teleporting extra much
+                me.evxLastTeleportTime = CurTime() + math.random(1, 4)
             end
         end,
         givedamage = function(target, dmginfo)
             local me = dmginfo:GetInflictor()
+            dmginfo:ScaleDamage(3)
 
-            if me.evxAttackTime and (CurTime() - me.evxAttackTime > 6) then
+            if me:IsNPC() and me.evxAttackTime and
+                (CurTime() - me.evxAttackTime > 6) then
                 me:EmitSound(Sound("evx/horror4.wav"), 70, 100)
 
                 me.evxAttackTime = CurTime()
             end
         end,
-        tick = function(ent) ent:SetPlaybackRate(100) end
+        tick = function(ent)
+            ent:SetPlaybackRate(100)
+
+            -- if CurTime() - ent.evxSolidTime > 1.5 and ent:GetSolid() ~=
+            --    SOLID_BBOX then ent:SetSolid(SOLID_BBOX) end
+
+            if ent:IsNPC() and CurTime() - ent.evxLastTeleportTime > 3 then
+                local nearbyStuff = ents.FindInSphere(ent:GetPos(), 2000)
+                for _, nearbyEnt in pairs(nearbyStuff) do
+                    if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
+                        local min, max = ent:GetCollisionBounds()
+
+                        local signX = -1 + (math.random(0, 1) * 2)
+                        local signY = -1 + (math.random(0, 1) * 2)
+
+                        local randVec = Vector(max.x * 5 * signX,
+                                               max.y * 5 * signY, 0)
+                        ent:SetPos(nearbyEnt:GetPos() + randVec)
+                        ent:SetRenderMode(RENDERMODE_TRANSCOLOR)
+                        ent:SetAngles(
+                            (nearbyEnt:GetPos() - ent:GetPos()):Angle())
+                        break
+                    end
+                end
+
+                -- ent:SetSolid(SOLID_NONE)
+
+                ent.evxLastTeleportTime = CurTime()
+                -- ent.evxSolidTime = CurTime()
+            end
+        end
     },
     rogue = {
         color = Color(0, 0, 255, 255),
