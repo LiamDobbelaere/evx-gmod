@@ -95,8 +95,7 @@ local bannedEssences = {
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
-    "rogue", "pyro", "lifesteal", "metal", "gnome", "gas", "spidersack",
-    "possessed", "mix2"
+    "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2"
 }
 local deployableTypes = {
     ["gas"] = true,
@@ -1128,7 +1127,7 @@ if SERVER then
         if not IsEvxEnabled() then return end
         if ent.evxIgnore then return end
 
-        if ent:GetClass() == "prop_physics" and math.random() <
+        if false and ent:GetClass() == "prop_physics" and math.random() <
             GetRandomSpidersChance() then
             local baby = ents.Create("npc_headcrab_fast")
 
@@ -1199,7 +1198,7 @@ if SERVER then
     local function recalculateWeights()
         evxChances = {
             ["nothing"] = GetSpawnRateFor("nothing"),
-            ["spidersack"] = GetSpawnRateFor("spidersack"),
+            -- ["spidersack"] = GetSpawnRateFor("spidersack"),
             ["possessed"] = GetSpawnRateFor("possessed"),
             ["gas"] = GetSpawnRateFor("gas"),
             ["lifesteal"] = GetSpawnRateFor("lifesteal"),
@@ -1212,7 +1211,7 @@ if SERVER then
             ["cloaked"] = GetSpawnRateFor("cloaked"),
             ["mother"] = GetSpawnRateFor("mother"),
             ["boss"] = GetSpawnRateFor("boss"),
-            ["rogue"] = GetSpawnRateFor("rogue"),
+            -- ["rogue"] = GetSpawnRateFor("rogue"),
             ["bigboss"] = GetSpawnRateFor("bigboss"),
             -- ["turret"] = 10000,
             ["mix2"] = GetSpawnRateFor("mix2")
@@ -1295,6 +1294,7 @@ if SERVER then
         ent:SetMaterial("")
         ent:SetRenderFX(kRenderFxNone)
         ent:SetRenderMode(RENDERMODE_NORMAL)
+        ent:SetPlaybackRate(1)
 
         if IsUsingColors() then
             local variationStrength = math.max(0.4,
