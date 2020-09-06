@@ -44,7 +44,13 @@ local textStrings = {
         wobbleFac = 0.5,
         wobbleSpeedFac = 8
     }, {
-        text = "Mercury: gas type",
+        text = "Mercury: gas and detonation type",
+        color = cblue,
+        maxTime = 2.222 * 2,
+        wobbleFac = 1.5,
+        wobbleSpeedFac = 1
+    }, {
+        text = "zorich_michael: teleporting (possessed)",
         color = cblue,
         maxTime = 2.222 * 2,
         wobbleFac = 1.5,

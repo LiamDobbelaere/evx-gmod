@@ -536,7 +536,7 @@ local evxConfig = {
         end,
         takedamage = function(target, dmginfo)
             dmginfo:SetDamageType(DMG_GENERIC)
-            if dmginfo:GetDamage() > 10 then dmginfo:SetDamage(10) end
+            if dmginfo:GetDamage() > 15 then dmginfo:SetDamage(15) end
 
         end,
         givedamage = function(target, dmginfo)
@@ -850,7 +850,9 @@ properties.Add("variants", {
     MenuIcon = "icon16/bug.png",
     Filter = function(self, ent, ply)
         if (not IsValid(ent)) then return false end
-        if (not ent:IsNPC()) then return false end
+        if (not ent:IsNPC() and ent:GetClass() ~= "sent_evx_essence") then
+            return false
+        end
         if (not gamemode.Call("CanProperty", ply, "variants", ent)) then
             return false
         end
@@ -887,7 +889,10 @@ properties.Add("variants", {
         end
 
         ent:SetNWString("evxType", variant)
-        table.insert(evxPendingInit, ent)
+
+        if ent:GetClass() ~= "sent_evx_essence" then
+            table.insert(evxPendingInit, ent)
+        end
     end
 })
 
@@ -941,7 +946,9 @@ properties.Add("variantslevel", {
     MenuIcon = "icon16/bug_edit.png",
     Filter = function(self, ent, ply)
         if (not IsValid(ent)) then return false end
-        if (not ent:IsNPC()) then return false end
+        if (not ent:IsNPC() and ent:GetClass() ~= "sent_evx_essence") then
+            return false
+        end
         if (not gamemode.Call("CanProperty", ply, "variants", ent)) then
             return false
         end
@@ -970,7 +977,10 @@ properties.Add("variantslevel", {
         if (not self:Filter(ent, player)) then return end
 
         ent:SetNWInt("evxLevel", level)
-        table.insert(evxPendingInit, ent)
+
+        if ent:GetClass() ~= "sent_evx_essence" then
+            table.insert(evxPendingInit, ent)
+        end
     end
 })
 
