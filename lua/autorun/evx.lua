@@ -1690,7 +1690,7 @@ if SERVER then
             if GetSpawnRateFor("chimera") ~= 0 and
                 math.random(1, GetSpawnRateFor("chimera")) == 1 and
                 not IsChimeraActive() then
-                local boss = ents.Create("npc_combine_s")
+                local boss = ents.Create(ent:GetClass())
                 boss.evxIgnore = true
                 boss:SetPos(ent:GetPos())
                 boss:SetAngles(Angle(0, 0, 0))
@@ -1698,7 +1698,10 @@ if SERVER then
                 boss:Activate()
                 boss:SetHealth(1001)
 
-                boss:Give("weapon_smg1")
+                if IsValid(ent:GetActiveWeapon()) then
+                    boss:Give(ent:GetActiveWeapon():GetClass())
+                end
+
                 boss:SetNWString("evxType", "chimera")
 
                 table.insert(evxPendingInit, boss)
