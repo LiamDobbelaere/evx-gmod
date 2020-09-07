@@ -92,20 +92,20 @@ local bannedEssences = {
     ["spidersack"] = true,
     ["motherchild"] = true,
     ["spiderbaby"] = true,
-    ["chimera"] = true,
     ["cloner"] = true,
     ["clone"] = true,
-    ["detonation"] = true
+    ["chimera"] = true
 }
 
 local evxTypes = {
     "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
     "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2",
-    "chimera", "detonation"
+    "chimera", "detonation", "spidersack"
 }
 local evxTypesChimera = {
     "knockback", "pyro", "lifesteal", "metal", "possessed", "psychic"
 }
+local bossTypes = {["chimera"] = true}
 local deployableTypes = {
     ["gas"] = true,
     ["explosion"] = true,
@@ -295,7 +295,10 @@ local evxConfig = {
                 local closestDistance = 100000
                 local nearbyStuff = ents.FindInSphere(ent:GetPos(), 500)
                 for _, nearbyEnt in pairs(nearbyStuff) do
-                    if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
+                    if IsValid(nearbyEnt) and nearbyEnt ~= ent and
+                        (nearbyEnt:IsPlayer() or
+                            (nearbyEnt:IsNPC() and nearbyEnt:GetClass() ~=
+                                ent:GetClass())) then
                         local dist = ent:GetPos():DistToSqr(nearbyEnt:GetPos())
 
                         if dist < closestDistance then
@@ -432,7 +435,7 @@ local evxConfig = {
                 (me:Health() - dmginfo:GetDamage()) > 0 then
                 me.evxTotalDamageTaken = 0
 
-                if not me.evxChimera then
+                if not me.evxChimera and not dmginfo:GetAttacker():IsNPC() then
                     -- Teleport far away
                     local signX = -1 + (math.random(0, 1) * 2)
                     local signY = -1 + (math.random(0, 1) * 2)
@@ -449,7 +452,6 @@ local evxConfig = {
         end,
         givedamage = function(target, dmginfo)
             local me = dmginfo:GetInflictor()
-            dmginfo:ScaleDamage(3)
 
             if me:IsNPC() and me.evxAttackTime and
                 (CurTime() - me.evxAttackTime > 6) then
@@ -470,9 +472,11 @@ local evxConfig = {
             end
 
             if ent:IsNPC() and CurTime() - ent.evxLastTeleportTime > tptime then
-                local nearbyStuff = ents.FindInSphere(ent:GetPos(), 2000)
+                local nearbyStuff = ents.FindInSphere(ent:GetPos(), 1200)
                 for _, nearbyEnt in pairs(nearbyStuff) do
-                    if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
+                    if IsValid(nearbyEnt) and (nearbyEnt:IsPlayer() or
+                        (nearbyEnt:IsNPC() and nearbyEnt:GetClass() ~=
+                            ent:GetClass())) then
                         local min, max = ent:GetCollisionBounds()
 
                         local signX = -1 + (math.random(0, 1) * 2)
@@ -536,8 +540,12 @@ local evxConfig = {
         end,
         takedamage = function(target, dmginfo)
             dmginfo:SetDamageType(DMG_GENERIC)
-            if dmginfo:GetDamage() > 15 then dmginfo:SetDamage(15) end
 
+            dmginfo:ScaleDamage(0.5)
+
+            if dmginfo:GetDamage() >= target:Health() then
+                dmginfo:SetDamage(15)
+            end
         end,
         givedamage = function(target, dmginfo)
             local me = dmginfo:GetInflictor()
@@ -1005,26 +1013,16 @@ if CLIENT then
     end)
 
     net.Receive("EVX_Chimera_Psychic", function(len)
-        timer.Simple(0.05,
-                     function() LocalPlayer():ConCommand("+menu_context") end)
-        timer.Simple(0.1,
-                     function() LocalPlayer():ConCommand("-menu_context") end)
-        timer.Simple(0.15,
-                     function() LocalPlayer():ConCommand("+menu_context") end)
-        timer.Simple(0.2,
-                     function() LocalPlayer():ConCommand("-menu_context") end)
-        timer.Simple(0.25,
-                     function() LocalPlayer():ConCommand("+menu_context") end)
-        timer.Simple(0.3,
-                     function() LocalPlayer():ConCommand("-menu_context") end)
-        timer.Simple(0.35,
-                     function() LocalPlayer():ConCommand("+menu_context") end)
-        timer.Simple(0.4,
-                     function() LocalPlayer():ConCommand("-menu_context") end)
-        timer.Simple(0.45,
-                     function() LocalPlayer():ConCommand("+menu_context") end)
-        timer.Simple(0.5,
-                     function() LocalPlayer():ConCommand("-menu_context") end)
+        timer.Simple(0.05, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.1, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.15, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.2, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.25, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.3, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.35, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.4, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.45, function() LocalPlayer():ConCommand("invnext") end)
+        timer.Simple(0.5, function() LocalPlayer():ConCommand("invnext") end)
         timer.Simple(1, function() LocalPlayer():ConCommand("+attack") end)
         timer.Simple(1, function() LocalPlayer():ConCommand("+jump") end)
         timer.Simple(2, function() LocalPlayer():ConCommand("-attack") end)
@@ -1053,10 +1051,15 @@ if CLIENT then
                                     "Spawnrates", "", "", function(panel)
             panel:ClearControls()
 
+            panel:Help(
+                "The higher the number, the more likely they are to appear. All numbers are relative to each other. Set a slider to 0 to disable spawning that type.")
+
             panel:NumSlider("Nothing", "evx_rate_nothing", 0, 200)
             for _, v in pairs(evxTypes) do
-                panel:NumSlider(v:gsub("^%l", string.upper), "evx_rate_" .. v,
-                                0, 200)
+                if not bossTypes[v] then
+                    panel:NumSlider(v:gsub("^%l", string.upper),
+                                    "evx_rate_" .. v, 0, 200)
+                end
             end
 
             panel:NumSlider("Random spiders chance",
@@ -1072,14 +1075,35 @@ if CLIENT then
                                     "", "", function(panel)
             panel:ClearControls()
             panel:CheckBox("Enabled", "evx_enabled")
+            panel:Help("Completely enable or disable EV-X.")
             panel:CheckBox("Affect allies", "evx_affect_allies")
+            panel:Help(
+                "Whether allies like rebels or Alyx should also get random variations.")
             panel:CheckBox("Use colors", "evx_use_colors")
+            panel:Help(
+                "Change the NPC's color depending on what variation they have.")
             panel:CheckBox("Use color intensity for levels",
                            "evx_level_use_color_intensity")
+            panel:Help(
+                "Show the strength of an NPC's EV-X level by increasing their color's intensity.")
             panel:CheckBox("Randomize on rate change",
                            "evx_randomize_on_rate_change")
+            panel:Help("Re-randomize NPCs everytime you change spawnrates.")
             panel:CheckBox("Enable music events", "evx_allow_music")
+            panel:Help("Play music during certain events like bosses appearing.")
             panel:NumSlider("Force level", "evx_level_force", 0, 100)
+            panel:Help("Force all EV-X NPCs to always have this level.")
+        end)
+
+        spawnmenu.AddToolMenuOption("Utilities", "EV-X", "Bosses", "Bosses", "",
+                                    "", function(panel)
+            panel:ClearControls()
+            panel:Help(
+                "These spawnrates are 1 out of X, so setting something to 100 would mean that 1 out of 100 NPC kills could spawn that boss. Set to 0 to disable that boss.")
+            for k, _ in pairs(bossTypes) do
+                panel:NumSlider(k:gsub("^%l", string.upper), "evx_rate_" .. k,
+                                0, 200)
+            end
         end)
     end)
 
@@ -1095,11 +1119,14 @@ if CLIENT then
 
         if essenceTimeLeft > 800 then essenceTimeLeftString = "" end
 
-        text =
-            "Active: " .. string.upper(LocalPlayer():GetNWString("evxType")) ..
-                " Lv." .. LocalPlayer():GetNWInt("evxLevel", -1) ..
-                essenceTimeLeftString
         evxType = LocalPlayer():GetNWString("evxType")
+        if evxType == "chimera" then
+            evxType = LocalPlayer():GetNWString("evxType2", "chimera")
+        end
+
+        text = "Active: " .. string.upper(evxType) .. " Lv." ..
+                   LocalPlayer():GetNWInt("evxLevel", -1) ..
+                   essenceTimeLeftString
 
         local font = "DermaLarge"
 
@@ -1429,10 +1456,9 @@ if SERVER then
     end
 
     local function evxApply(ent)
-        if not IsEvxEnabled() then return end
         if ent.evxIgnore then return end
 
-        if false and ent:GetClass() == "prop_physics" and math.random() <
+        if ent:GetClass() == "prop_physics" and math.random() <
             GetRandomSpidersChance() then
             local baby = ents.Create("npc_headcrab_fast")
 
@@ -1496,7 +1522,8 @@ if SERVER then
     local function recalculateWeights()
         evxChances = {
             ["nothing"] = GetSpawnRateFor("nothing"),
-            -- ["spidersack"] = GetSpawnRateFor("spidersack"),
+            ["spidersack"] = GetSpawnRateFor("spidersack"),
+            -- ["chimera"] = GetSpawnRateFor("chimera"),
             ["detonation"] = GetSpawnRateFor("detonation"),
             ["possessed"] = GetSpawnRateFor("possessed"),
             ["gas"] = GetSpawnRateFor("gas"),
@@ -1585,12 +1612,12 @@ if SERVER then
     function evxInit(ent)
         -- reset these before a modifier changes it
         ent:SetModelScale(1)
-        if not ent:IsPlayer() then
-            if not ent.evxChimera then
+        if not ent.evxChimera then
+            if not ent:IsPlayer() then
                 ent:SetHealth(ent:GetMaxHealth())
+            else
+                ent:SetHealth(math.min(ent:GetMaxHealth(), ent:Health() + 15))
             end
-        else
-            ent:SetHealth(math.min(ent:GetMaxHealth(), ent:Health() + 15))
         end
         ent:SetMaterial("")
         ent:SetRenderFX(kRenderFxNone)
@@ -1660,7 +1687,8 @@ if SERVER then
             end
 
             -- Chimera boss
-            if math.random(1, GetSpawnRateFor("chimera")) == 1 and
+            if GetSpawnRateFor("chimera") ~= 0 and
+                math.random(1, GetSpawnRateFor("chimera")) == 1 and
                 not IsChimeraActive() then
                 local boss = ents.Create("npc_combine_s")
                 boss.evxIgnore = true
@@ -1700,6 +1728,8 @@ if SERVER then
     end)
 
     hook.Add("EntityRemoved", "EVXEntityRemoved", function(ent)
+        if not IsEvxEnabled() then return end
+
         if IsValid(ent) and HasValidEVXType(ent) then
             evxNPCs[ent] = nil
             evxPlayerNPCs[ent] = nil
@@ -1746,6 +1776,8 @@ if SERVER then
     end)
 
     hook.Add("OnEntityCreated", "EVXSpawnedNPC", function(ent)
+        if not IsEvxEnabled() then return end
+
         evxApply(ent)
 
         for evxNPC, _ in pairs(evxNPCs) do
@@ -1757,6 +1789,8 @@ if SERVER then
     end)
 
     hook.Add("KeyPress", "EVXKeyPress", function(ply, key)
+        if not IsEvxEnabled() then return end
+
         if IsValid(ply) and HasValidEVXType(ply) then
             if key == IN_ATTACK2 and ply:Crouching() then
                 safeCall(evxConfig[ply:GetNWString("evxType")].plysecondary, ply)
@@ -1772,11 +1806,12 @@ if SERVER then
             if IsValid(evxNPC) and HasValidEVXType(evxNPC) then
                 if evxNPC:IsPlayer() then
                     local level = evxNPC:GetNWInt("evxLevel", 0)
+                    local type = evxNPC:GetNWString("evxType", nil)
 
                     evxNPC:SetNWFloat("essenceMax", 1 / level * 8000 *
                                           GetEssenceTimerFactor())
 
-                    if level == 100 and CanPlayMusic() then
+                    if level == 100 and CanPlayMusic() and type ~= "chimera" then
                         evxNPC:EmitSound("evx/credits.mp3")
                     end
                 end
