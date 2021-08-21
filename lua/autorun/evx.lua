@@ -102,6 +102,7 @@ local evxTypes = {
     "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2",
     "chimera", "detonation", "spidersack"
 }
+-- Psychic should be at the end, hotfix to allow disabling the psychic variation
 local evxTypesChimera = {
     "knockback", "pyro", "lifesteal", "metal", "possessed", "psychic"
 }
@@ -550,7 +551,11 @@ local evxConfig = {
         givedamage = function(target, dmginfo)
             local me = dmginfo:GetInflictor()
 
-            local rndType = evxTypesChimera[math.random(#evxTypesChimera)]
+            local chimeraTypeCount = #evxTypesChimera
+            if GetConVar("evx_disable_psychic"):GetBool() then
+                chimeraTypeCount = chimeraTypeCount - 1
+            end
+            local rndType = evxTypesChimera[math.random(chimeraTypeCount)]
 
             timer.Simple(0, function()
                 if (IsValid(me)) then
@@ -563,7 +568,11 @@ local evxConfig = {
         end,
         tick = function(ent)
             if CurTime() - ent.evxTypeSwitchTimer > 3 then
-                local rndType = evxTypesChimera[math.random(#evxTypesChimera)]
+                local chimeraTypeCount = #evxTypesChimera
+                if GetConVar("evx_disable_psychic"):GetBool() then
+                    chimeraTypeCount = chimeraTypeCount - 1
+                end    
+                local rndType = evxTypesChimera[math.random(chimeraTypeCount)]
 
                 timer.Simple(0, function()
                     if (IsValid(ent)) then
@@ -1091,6 +1100,9 @@ if CLIENT then
             panel:Help("Re-randomize NPCs everytime you change spawnrates.")
             panel:CheckBox("Enable music events", "evx_allow_music")
             panel:Help("Play music during certain events like bosses appearing.")
+            panel:CheckBox("Disable psychic", "evx_disable_psychic")
+            panel:Help(
+                "The psychic variation on Chimera can feel disruptive, use this to disable it.")
             panel:NumSlider("Force level", "evx_level_force", 0, 100)
             panel:Help("Force all EV-X NPCs to always have this level.")
         end)
@@ -1302,6 +1314,8 @@ if SERVER then
                  "Enable enemy variations", 0, 1)
     CreateConVar("evx_allow_music", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable EV-X music events", 0, 1)
+    CreateConVar("evx_disable_psychic", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Disable the psychic variation on the Chimera boss ", 0, 1)
     CreateConVar("evx_affect_allies", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Include allies like Alyx, rebels or animals in getting variations",
                  0, 1)
