@@ -44,7 +44,7 @@ AddCSLuaFile()
 - Variant that works like a Minecraft creeper, explode when near player (Mercury)
 - Variant with even more variations than mix2? (crobles74)
 - Variant with health regeneration (Vladbzf)
-- Variant like mother but that spawns different variant babies (crobles74)
+- Variant like mommy but that spawns different variant babies (crobles74)
 - Variant that gives players a 'bleed' effect (Mercury)
 - Variant that is your ally (Mercury)
 - Variant that can infect a player or NPC (Apples / Jerkakame)
@@ -83,6 +83,9 @@ local function randomEnemyLevel()
         max = 100
     end
 
+    min = math.max(min, GetConVar("evx_level_min"):GetInt())
+    max = math.min(max, GetConVar("evx_level_max"):GetInt())
+
     return math.random(min, max)
 end
 
@@ -90,7 +93,7 @@ local bannedEssences = {
     ["cloaked"] = true,
     ["rogue"] = true,
     ["spidersack"] = true,
-    ["motherchild"] = true,
+    ["mommychild"] = true,
     ["spiderbaby"] = true,
     ["cloner"] = true,
     ["clone"] = true,
@@ -98,20 +101,20 @@ local bannedEssences = {
 }
 
 local evxTypes = {
-    "explosion", "mother", "boss", "bigboss", "knockback", "cloaked", "puller",
+    "explosion", "mommy", "boss", "bigboss", "knockback", "cloaked", "puller",
     "pyro", "lifesteal", "metal", "gnome", "gas", "possessed", "mix2",
-    "chimera", "detonation", "spidersack"
+    "chimera", "detonation", "spidersack", "spy"
 }
--- Psychic should be at the end, hotfix to allow disabling the psychic variation
+
 local evxTypesChimera = {
-    "knockback", "pyro", "lifesteal", "metal", "possessed", "psychic"
+    "knockback", "pyro", "lifesteal", "metal", "cloaked"
 }
 local bossTypes = {["chimera"] = true}
 local deployableTypes = {
     ["gas"] = true,
     ["explosion"] = true,
     ["possessed"] = true,
-    ["mother"] = true
+    ["mommy"] = true
 }
 table.sort(evxTypes)
 evxPendingInit = {}
@@ -123,6 +126,12 @@ evxPendingInit = {}
 -- givedamage(target, dmginfo) - ev-x NPC is giving damage
 -- tick(ent) - ev-x tick, ent is the ev-x NPC itself
 -- killed(ent, attacker, inflictor) - ev-x NPC was killed
+
+local function evxScaleEntity(ent, scale)
+    if GetConVar("evx_scale_no_big"):GetBool() and scale > 1 then return end
+
+    ent:SetModelScale(scale)
+end
 
 local function evxExplosionKilled(ent, pos)
     local explosionMagnitude = tostring(ent:GetNWInt("evxLevel", 1) / 100 * 240) -- pre-level was 80
@@ -191,7 +200,7 @@ local function evxPossessedKilled(ent, pos)
     ent:EmitSound(Sound("evx/horror3.wav"), 70, 100)
 end
 
-local function evxMotherKilled(ent, pos)
+local function evxMommyKilled(ent, pos)
     local bmin, bmax = ent:GetModelBounds()
     local scale = ent:GetModelScale()
     local positions = {
@@ -218,7 +227,7 @@ local function evxMotherKilled(ent, pos)
         if ent:IsPlayer() then baby:Give("weapon_smg1") end
 
         baby:SetNWInt("evxLevel", ent:GetNWInt("evxLevel", 1))
-        baby:SetNWString("evxType", "motherchild")
+        baby:SetNWString("evxType", "mommychild")
         baby:SetNWString("evxType2", nil)
         baby:Spawn()
         baby:Activate()
@@ -342,6 +351,34 @@ local evxConfig = {
             resetEVXFor(ply)
         end
     },
+    spy = {
+        color = Color(255, 255, 255, 255),
+        spawn = function(ent)
+            local friendlyModels = {
+                -- "models/mossman.mdl",
+                -- "models/alyx.mdl",
+                -- "models/Barney.mdl",
+                -- "models/Eli.mdl",
+                -- "models/Kleiner.mdl",
+                -- "models/monk.mdl",
+                -- "models/odessa.mdl",
+                -- "models/vortigaunt.mdl",
+                -- "models/dog.mdl",
+                "models/Humans/Group03/Female_01.mdl",
+                "models/Humans/Group03/male_02.mdl",
+                "models/Humans/Group01/Female_01.mdl",
+                "models/Humans/Group01/male_02.mdl",
+                "models/Humans/Group02/Female_01.mdl",
+                "models/Humans/Group02/male_02.mdl",
+                "models/Humans/Group03m/Female_01.mdl",
+                "models/Humans/Group03m/male_02.mdl"
+            }
+
+            local rndModel = friendlyModels[math.random(#friendlyModels)]
+
+            ent:SetModel(rndModel);
+        end
+    },
     spidersack = {
         color = Color(50, 100, 50, 255),
         spawn = function(ent) end,
@@ -381,7 +418,7 @@ local evxConfig = {
     spiderbaby = {
         color = Color(0, 0, 0, 255),
         spawn = function(ent)
-            ent:SetModelScale(0.2)
+            evxScaleEntity(ent, 0.2)
             ent:SetHealth(1)
 
             if not ent.evxPermanent then
@@ -526,8 +563,11 @@ local evxConfig = {
             net.Start("EVX_Chimera_Boss")
             net.Broadcast()
 
-            for _, ply in ipairs(player.GetAll()) do
-                ply:SetViewEntity(anim)
+            -- skip this if server disabled chimera intro
+            if not GetConVar("evx_no_chimera_intro"):GetBool() then
+                for _, ply in ipairs(player.GetAll()) do
+                    ply:SetViewEntity(anim)
+                end
             end
 
             ent.evxTypeSwitchTimer = CurTime()
@@ -552,9 +592,6 @@ local evxConfig = {
             local me = dmginfo:GetInflictor()
 
             local chimeraTypeCount = #evxTypesChimera
-            if GetConVar("evx_disable_psychic"):GetBool() then
-                chimeraTypeCount = chimeraTypeCount - 1
-            end
             local rndType = evxTypesChimera[math.random(chimeraTypeCount)]
 
             timer.Simple(0, function()
@@ -569,9 +606,6 @@ local evxConfig = {
         tick = function(ent)
             if CurTime() - ent.evxTypeSwitchTimer > 3 then
                 local chimeraTypeCount = #evxTypesChimera
-                if GetConVar("evx_disable_psychic"):GetBool() then
-                    chimeraTypeCount = chimeraTypeCount - 1
-                end    
                 local rndType = evxTypesChimera[math.random(chimeraTypeCount)]
 
                 timer.Simple(0, function()
@@ -585,23 +619,6 @@ local evxConfig = {
             end
 
             -- ent:SetHealth(ent:Health() + 1)
-        end
-    },
-    psychic = {
-        color = Color(255, 128, 128, 255),
-        spawn = function(ent) ent.evxLastDisturbTime = CurTime() - 10 end,
-        tick = function(ent)
-            if CurTime() - ent.evxLastDisturbTime > 10 then
-                local nearbyStuff = ents.FindInSphere(ent:GetPos(), 1000)
-                for _, nearbyEnt in pairs(nearbyStuff) do
-                    if IsValid(nearbyEnt) and nearbyEnt:IsPlayer() then
-                        net.Start("EVX_Chimera_Psychic")
-                        net.Send(nearbyEnt)
-                        ent.evxLastDisturbTime = CurTime()
-                        break
-                    end
-                end
-            end
         end
     },
     cloner = {
@@ -688,7 +705,7 @@ local evxConfig = {
     gnome = {
         color = Color(0, 128, 255, 255),
         spawn = function(ent)
-            ent:SetModelScale(0.4)
+            evxScaleEntity(ent, 0.4)
             ent:SetHealth(ent:Health() / 4)
         end,
         givedamage = function(target, dmginfo)
@@ -746,7 +763,7 @@ local evxConfig = {
     boss = {
         color = Color(80, 80, 100, 255),
         spawn = function(ent)
-            ent:SetModelScale(1.5)
+            evxScaleEntity(ent, 1.5)
             ent:SetHealth(ent:Health() * 8)
         end,
         givedamage = function(target, dmginfo)
@@ -760,7 +777,7 @@ local evxConfig = {
     bigboss = {
         color = Color(0, 255, 255, 255),
         spawn = function(ent)
-            ent:SetModelScale(2)
+            evxScaleEntity(ent, 2)
             ent:SetHealth(ent:Health() * 16)
         end,
         givedamage = function(target, dmginfo)
@@ -771,25 +788,25 @@ local evxConfig = {
             dmginfo:SetDamageForce(dmginfo:GetDamageForce() * dmg)
         end
     },
-    mother = {
+    mommy = {
         color = Color(255, 255, 0, 255),
-        spawn = function(ent) ent:SetModelScale(1.5) end,
+        spawn = function(ent) evxScaleEntity(ent, 1.5) end,
         killed = function(ent, attacker, inflictor)
-            evxMotherKilled(ent, ent:GetPos())
+            evxMommyKilled(ent, ent:GetPos())
         end,
         plysecondary = function(ply)
             local trace = ply:GetEyeTrace()
             if not trace.Hit then return end
 
-            evxMotherKilled(ply, trace.HitPos + Vector(0, 0, 200))
+            evxMommyKilled(ply, trace.HitPos + Vector(0, 0, 200))
 
             resetEVXFor(ply)
         end
     },
-    motherchild = {
+    mommychild = {
         color = Color(255, 128, 0, 255),
         spawn = function(ent)
-            ent:SetModelScale(0.5)
+            evxScaleEntity(ent, 0.5)
             ent:SetHealth(ent:Health() / 3)
         end,
         givedamage = function(target, dmginfo)
@@ -1021,32 +1038,6 @@ if CLIENT then
         if (LocalPlayer().evxMusic) then LocalPlayer().evxMusic:Stop() end
     end)
 
-    net.Receive("EVX_Chimera_Psychic", function(len)
-        timer.Simple(0.05, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.1, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.15, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.2, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.25, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.3, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.35, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.4, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.45, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(0.5, function() LocalPlayer():ConCommand("invnext") end)
-        timer.Simple(1, function() LocalPlayer():ConCommand("+attack") end)
-        timer.Simple(1, function() LocalPlayer():ConCommand("+jump") end)
-        timer.Simple(2, function() LocalPlayer():ConCommand("-attack") end)
-        timer.Simple(2, function() LocalPlayer():ConCommand("-jump") end)
-        timer.Simple(3, function() LocalPlayer():ConCommand("+attack") end)
-        timer.Simple(3, function() LocalPlayer():ConCommand("+jump") end)
-        timer.Simple(4, function() LocalPlayer():ConCommand("-attack") end)
-        timer.Simple(4, function() LocalPlayer():ConCommand("-jump") end)
-        timer.Simple(5, function()
-            if math.random(20) == 1 then
-                LocalPlayer():ConCommand("say I always play this bad, I'm sorry")
-            end
-        end)
-    end)
-
     CreateClientConVar("evx_draw_hud", "1", true, false,
                        "Disable drawing the ev-x hud, like displaying NPC health and type",
                        0, 1)
@@ -1088,6 +1079,9 @@ if CLIENT then
             panel:CheckBox("Affect allies", "evx_affect_allies")
             panel:Help(
                 "Whether allies like rebels or Alyx should also get random variations.")
+            panel:CheckBox("Draw enemy HUD", "evx_draw_hud");
+            panel:Help(
+                "Draw the enemy's type, level and health on the screen.")
             panel:CheckBox("Use colors", "evx_use_colors")
             panel:Help(
                 "Change the NPC's color depending on what variation they have.")
@@ -1100,11 +1094,22 @@ if CLIENT then
             panel:Help("Re-randomize NPCs everytime you change spawnrates.")
             panel:CheckBox("Enable music events", "evx_allow_music")
             panel:Help("Play music during certain events like bosses appearing.")
-            panel:CheckBox("Disable psychic", "evx_disable_psychic")
-            panel:Help(
-                "The psychic variation on Chimera can feel disruptive, use this to disable it.")
             panel:NumSlider("Force level", "evx_level_force", 0, 100)
             panel:Help("Force all EV-X NPCs to always have this level.")
+            panel:NumSlider("Min level", "evx_level_min", 0, 100)
+            panel:Help("All EV-X NPCs to always have at least this level.")
+            panel:NumSlider("Max level", "evx_level_max", 0, 100)
+            panel:Help("All EV-X NPCs to always have at most this level.")
+            panel:Button("RESET all", "evx_general_reset_all")
+        end)
+
+        spawnmenu.AddToolMenuOption("Utilities", "EV-X", "Type-specific options", "Type-specific options",
+                                    "", "", function(panel)
+            panel:ClearControls()
+            panel:CheckBox("Never bigger NPCs", "evx_scale_no_big")
+            panel:Help("Prevent EV-X from making NPCs bigger, so they don't get stuck on things.");
+            panel:CheckBox("No Chimera intro", "evx_no_chimera_intro")
+            panel:Help("Does not zoom into the chimera when it appears.");
         end)
 
         spawnmenu.AddToolMenuOption("Utilities", "EV-X", "Bosses", "Bosses", "",
@@ -1209,7 +1214,7 @@ if CLIENT then
             return
         end
 
-        if evxType == "cloaked" or evxType == "spiderbaby" then return end
+        if evxType == "cloaked" or evxType == "spy" or evxType == "spiderbaby" then return end
 
         surface.SetFont(font)
         local w, h = surface.GetTextSize(text)
@@ -1308,14 +1313,11 @@ end
 if SERVER then
     util.AddNetworkString("EVX_Chimera_Boss")
     util.AddNetworkString("EVX_Chimera_Boss_End")
-    util.AddNetworkString("EVX_Chimera_Psychic")
 
     CreateConVar("evx_enabled", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable enemy variations", 0, 1)
     CreateConVar("evx_allow_music", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable EV-X music events", 0, 1)
-    CreateConVar("evx_disable_psychic", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
-                 "Disable the psychic variation on the Chimera boss ", 0, 1)
     CreateConVar("evx_affect_allies", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Include allies like Alyx, rebels or animals in getting variations",
                  0, 1)
@@ -1348,8 +1350,8 @@ if SERVER then
     CreateConVar("evx_rate_cloaked", "30", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the cloaked ev-x modifier in enemies", 0,
                  100000)
-    CreateConVar("evx_rate_mother", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
-                 "The spawnrate of the mother ev-x modifier in enemies", 0,
+    CreateConVar("evx_rate_mommy", "20", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The spawnrate of the mommy ev-x modifier in enemies", 0,
                  100000)
     CreateConVar("evx_rate_boss", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the boss ev-x modifier in enemies", 0, 100000)
@@ -1364,6 +1366,8 @@ if SERVER then
                  100000)
     CreateConVar("evx_rate_mix2", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the mix2 ev-x modifier in enemies", 0, 100000)
+    CreateConVar("evx_rate_spy", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                "The spawnrate of the spy ev-x modifier in enemies", 0, 100000)
     CreateConVar("evx_rate_metal", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the metal ev-x modifier in enemies", 0,
                  100000)
@@ -1385,9 +1389,12 @@ if SERVER then
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Change the multiplier of the essence time calculation, 2 would result in double essence time for everything",
                  0, 100000)
-
     CreateConVar("evx_level_force", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Force a level for all ev-x enemies, 0 to disable", 0, 100)
+    CreateConVar("evx_level_min", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "The minimum level an ev-x enemy can have", 1, 100)
+    CreateConVar("evx_level_max", "100", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                "The maximum level an ev-x enemy can have", 1, 100)
     CreateConVar("evx_level_use_color_intensity", "1",
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Use color intensity to display an ev-x enemy's level", 0, 1)
@@ -1395,6 +1402,12 @@ if SERVER then
                  {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The odds of getting random spider babies around physics props, 1 means 100% of the time",
                  0, 1)
+    CreateConVar("evx_scale_no_big", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                "Prevent EV-X from making NPCs bigger, so they don't get stuck on things.",
+                0, 1)
+    CreateConVar("evx_no_chimera_intro", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                "Does not zoom into the chimera when it appears.",
+                0, 1)
 
     local function IsEvxEnabled() return GetConVar("evx_enabled"):GetBool() end
     local function CanPlayMusic()
@@ -1549,12 +1562,13 @@ if SERVER then
             ["pyro"] = GetSpawnRateFor("pyro"),
             ["explosion"] = GetSpawnRateFor("explosion"),
             ["cloaked"] = GetSpawnRateFor("cloaked"),
-            ["mother"] = GetSpawnRateFor("mother"),
+            ["mommy"] = GetSpawnRateFor("mommy"),
             ["boss"] = GetSpawnRateFor("boss"),
             -- ["rogue"] = GetSpawnRateFor("rogue"),
             ["bigboss"] = GetSpawnRateFor("bigboss"),
             -- ["turret"] = 10000,
-            ["mix2"] = GetSpawnRateFor("mix2")
+            ["mix2"] = GetSpawnRateFor("mix2"),
+            ["spy"] = GetSpawnRateFor("spy"),
         }
 
         evxChancesMix = table.Copy(evxChances)
@@ -1602,6 +1616,18 @@ if SERVER then
         GetConVar("evx_level_force"):Revert()
     end)
 
+    concommand.Add("evx_general_reset_all", function()
+        GetConVar("evx_enabled"):Revert()
+        GetConVar("evx_affect_allies"):Revert()
+        GetConVar("evx_use_colors"):Revert()
+        GetConVar("evx_level_use_color_intensity"):Revert()
+        GetConVar("evx_randomize_on_rate_change"):Revert()
+        GetConVar("evx_allow_music"):Revert()
+        GetConVar("evx_level_force"):Revert()
+        GetConVar("evx_level_min"):Revert()
+        GetConVar("evx_level_max"):Revert()
+    end)
+
     -- TODO NPC variation exclusions:
     -- copy chances table
     -- remove bad variations for this npc
@@ -1617,7 +1643,7 @@ if SERVER then
         ["explosion"] = 50,
         ["knockback"] = 20,
         ["boss"] = 20,
-        ["mother"] = 20,
+        ["mommy"] = 20,
         ["bigboss"] = 5
     }
     local weightSumType2 = 0
@@ -1655,7 +1681,7 @@ if SERVER then
         end
 
         if ent:GetNWString("evxType2", false) then
-            ent:SetMaterial("models/shiny")
+            ent:SetMaterial("models/debug/debugwhite")
 
             if evxConfig[ent:GetNWString("evxType2")].tick ~= nil then
                 evxTickNPCs[ent] = true
@@ -1704,6 +1730,8 @@ if SERVER then
             if GetSpawnRateFor("chimera") ~= 0 and
                 math.random(1, GetSpawnRateFor("chimera")) == 1 and
                 not IsChimeraActive() then
+                evxChimeraActive = true
+
                 local boss = ents.Create(ent:GetClass())
                 boss.evxIgnore = true
                 boss:SetPos(ent:GetPos())
