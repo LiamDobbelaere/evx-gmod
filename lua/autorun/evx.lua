@@ -1,5 +1,7 @@
 AddCSLuaFile()
 
+local EVXHL2 = include("evx-hl2.lua")
+
 -- TODO: Disable specific types (especially spidersack & rogue)
 -- TODO: Extend possessed type (vision impairments? teleport to player? make very slow & deadly? heavy breathing?) X
 -- TODO: Variant that gives players a bleed effect (player effects could open up the way for cool new variants)
@@ -1094,6 +1096,8 @@ if CLIENT then
             panel:Help("Re-randomize NPCs everytime you change spawnrates.")
             panel:CheckBox("Enable music events", "evx_allow_music")
             panel:Help("Play music during certain events like bosses appearing.")
+            panel:CheckBox("Half-Life 2 Campaign Mode", "evx_hl2_campaign")
+            panel:Help("Use spawnrates customized to the HL2 campaign when playing HL2 maps.")
             panel:NumSlider("Force level", "evx_level_force", 0, 100)
             panel:Help("Force all EV-X NPCs to always have this level.")
             panel:NumSlider("Min level", "evx_level_min", 0, 100)
@@ -1316,6 +1320,9 @@ if SERVER then
 
     CreateConVar("evx_enabled", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable enemy variations", 0, 1)
+    CreateConVar("evx_hl2_campaign", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+                 "Use spawnrates customized to the HL2 campaign when playing HL2 maps.",
+                 0, 1)
     CreateConVar("evx_allow_music", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "Enable EV-X music events", 0, 1)
     CreateConVar("evx_affect_allies", "1", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
@@ -1366,7 +1373,7 @@ if SERVER then
                  100000)
     CreateConVar("evx_rate_mix2", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the mix2 ev-x modifier in enemies", 0, 100000)
-    CreateConVar("evx_rate_spy", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
+    CreateConVar("evx_rate_spy", "5", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                 "The spawnrate of the spy ev-x modifier in enemies", 0, 100000)
     CreateConVar("evx_rate_metal", "15", {FCVAR_REPLICATED, FCVAR_ARCHIVE},
                  "The spawnrate of the metal ev-x modifier in enemies", 0,
@@ -1547,29 +1554,41 @@ if SERVER then
     end
 
     local function recalculateWeights()
-        evxChances = {
-            ["nothing"] = GetSpawnRateFor("nothing"),
-            ["spidersack"] = GetSpawnRateFor("spidersack"),
-            -- ["chimera"] = GetSpawnRateFor("chimera"),
-            ["detonation"] = GetSpawnRateFor("detonation"),
-            ["possessed"] = GetSpawnRateFor("possessed"),
-            ["gas"] = GetSpawnRateFor("gas"),
-            ["lifesteal"] = GetSpawnRateFor("lifesteal"),
-            ["metal"] = GetSpawnRateFor("metal"),
-            ["gnome"] = GetSpawnRateFor("gnome"),
-            ["knockback"] = GetSpawnRateFor("knockback"),
-            ["puller"] = GetSpawnRateFor("puller"),
-            ["pyro"] = GetSpawnRateFor("pyro"),
-            ["explosion"] = GetSpawnRateFor("explosion"),
-            ["cloaked"] = GetSpawnRateFor("cloaked"),
-            ["mommy"] = GetSpawnRateFor("mommy"),
-            ["boss"] = GetSpawnRateFor("boss"),
-            -- ["rogue"] = GetSpawnRateFor("rogue"),
-            ["bigboss"] = GetSpawnRateFor("bigboss"),
-            -- ["turret"] = 10000,
-            ["mix2"] = GetSpawnRateFor("mix2"),
-            ["spy"] = GetSpawnRateFor("spy"),
-        }
+        local evxChancesOverride = nil
+        if EVXHL2.IsHalfLife2Map() and GetConVar("evx_hl2_campaign"):GetBool() then
+            evxChancesOverride = EVXHL2.GetMapSpecificWeights();
+            
+            print("Using HL2 campaign spawnrates for map " .. game.GetMap())
+            print("Map specific spawnrates are " .. table.ToString(evxChancesOverride))
+        end
+
+        if evxChancesOverride then
+            evxChances = evxChancesOverride
+        else
+            evxChances = {
+                ["nothing"] = GetSpawnRateFor("nothing"),
+                ["spidersack"] = GetSpawnRateFor("spidersack"),
+                -- ["chimera"] = GetSpawnRateFor("chimera"),
+                ["detonation"] = GetSpawnRateFor("detonation"),
+                ["possessed"] = GetSpawnRateFor("possessed"),
+                ["gas"] = GetSpawnRateFor("gas"),
+                ["lifesteal"] = GetSpawnRateFor("lifesteal"),
+                ["metal"] = GetSpawnRateFor("metal"),
+                ["gnome"] = GetSpawnRateFor("gnome"),
+                ["knockback"] = GetSpawnRateFor("knockback"),
+                ["puller"] = GetSpawnRateFor("puller"),
+                ["pyro"] = GetSpawnRateFor("pyro"),
+                ["explosion"] = GetSpawnRateFor("explosion"),
+                ["cloaked"] = GetSpawnRateFor("cloaked"),
+                ["mommy"] = GetSpawnRateFor("mommy"),
+                ["boss"] = GetSpawnRateFor("boss"),
+                -- ["rogue"] = GetSpawnRateFor("rogue"),
+                ["bigboss"] = GetSpawnRateFor("bigboss"),
+                -- ["turret"] = 10000,
+                ["mix2"] = GetSpawnRateFor("mix2"),
+                ["spy"] = GetSpawnRateFor("spy"),
+            }
+        end
 
         evxChancesMix = table.Copy(evxChances)
         evxChancesMix["mix2"] = nil
@@ -1583,7 +1602,7 @@ if SERVER then
             weightSumMix = weightSumMix + v
         end
 
-        if IsRandomizingOnRateChange() then
+        if evxChancesOverride or IsRandomizingOnRateChange() then
             for evxNPC, _ in pairs(evxNPCs) do
                 if IsValid(evxNPC) and evxNPC:IsNPC() then
                     evxNPC:SetNWString("evxType", nil)
@@ -1618,6 +1637,7 @@ if SERVER then
 
     concommand.Add("evx_general_reset_all", function()
         GetConVar("evx_enabled"):Revert()
+        GetConVar("evx_hl2_campaign"):Revert()
         GetConVar("evx_affect_allies"):Revert()
         GetConVar("evx_use_colors"):Revert()
         GetConVar("evx_level_use_color_intensity"):Revert()
@@ -1650,8 +1670,17 @@ if SERVER then
     for k, v in pairs(evxChancesType2) do weightSumType2 = weightSumType2 + v end
 
     function evxInit(ent)
+        if not ent.evxOriginalModelName then
+            ent.evxOriginalModelName = ent:GetModel()
+        end
+
         -- reset these before a modifier changes it
         ent:SetModelScale(1)
+        
+        if ent.evxOriginalModelName then
+            ent:SetModel(ent.evxOriginalModelName)
+        end
+
         if not ent.evxChimera then
             if not ent:IsPlayer() then
                 ent:SetHealth(ent:GetMaxHealth())
@@ -1660,6 +1689,7 @@ if SERVER then
             end
         end
         ent:SetMaterial("")
+        ent:SetColor(Color(255, 255, 255, 255))
         ent:SetRenderFX(kRenderFxNone)
         ent:SetRenderMode(RENDERMODE_NORMAL)
         ent:SetPlaybackRate(1)
